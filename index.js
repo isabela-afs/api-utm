@@ -95,6 +95,7 @@ async function vendaExiste(hash) {
 
 // 📥 Escuta mensagens do Telegram
 bot.on('message', async (msg) => {
+    console.log("📨 Mensagem recebida:", msg);
     if (msg.chat.id.toString() !== CHAT_ID) return;
 
     const texto = msg.text || '';
