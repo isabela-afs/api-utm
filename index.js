@@ -14,17 +14,26 @@ const db = new sqlite3.Database('banco.db', (err) => {
     }
 });
 
-// 🚀 Inicializa Express (caso queira expor endpoints depois)
+// 🚀 Inicializa Express (para expor webhook e outros endpoints)
 const app = express();
 app.use(express.json());
 
-// 🤖 Inicializa o bot do Telegram
+// 🤖 Inicializa o bot do Telegram SEM polling, para usar webhook
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID || '-1002733614113';
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
 
-console.log('🤖 Bot Telegram rodando...');
+// Configura endpoint para webhook do Telegram
+app.post(`/bot${TELEGRAM_BOT_TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
+// Define o webhook para o Telegram
+bot.setWebHook(`${process.env.WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}`)
+    .then(() => console.log('Webhook configurado com sucesso'))
+    .catch(err => console.error('Erro ao configurar webhook:', err));
 
 // ✅ Função para salvar venda corretamente
 function salvarVenda(venda) {
@@ -61,7 +70,7 @@ function salvarVenda(venda) {
     });
 }
 
-// 🗝️ Exemplo de funções utilitárias (simulação, ajuste conforme seu código real)
+// 🗝️ Funções utilitárias
 function gerarChaveUnica({ transaction_id }) {
     return `chave-${transaction_id}`;
 }
@@ -184,8 +193,8 @@ bot.on('message', async (msg) => {
     }
 });
 
-// 🚀 Se quiser subir o Express junto:
-const PORT = process.env.PORT || 10000;
+// 🚀 Sobe o servidor Express na porta 3000 ou variável PORT
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
