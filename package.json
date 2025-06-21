@@ -21,8 +21,10 @@
     "axios": "^1.6.7",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "sqlite3": "^5.1.6",
+    "input": "^1.0.1",
     "moment": "^2.29.4",
-    "node-telegram-bot-api": "^0.61.0"
+    "node-telegram-bot-api": "^0.61.0",
+    "sqlite3": "^5.1.7",
+    "telegram": "^2.26.22"
   }
 }

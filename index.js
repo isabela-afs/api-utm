@@ -1,239 +1,130 @@
-require('dotenv').config();
-
-const express = require('express');
-const axios = require('axios');
-const TelegramBot = require('node-telegram-bot-api');
+const { TelegramClient } = require('telegram');
+const { StringSession } = require('telegram/sessions');
+const input = require('input');
 const sqlite3 = require('sqlite3').verbose();
 const moment = require('moment');
 
+const apiId = '23313993'; // do my.telegram.org
+const apiHash = 'd9249aed345807c04562fb52448a878c'; 
+const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABuz+1Q9feCvA+Dip2wXs69msgn5aX2eNW5vI/EjRxWejG6P7wj+LQLFz3onE4DBASe09EyvG1OIsdbaNa4V7jMw3ogS2LM35YpcynV/VNVT8a3HNfNc3hQkQanlTTHFMWQcmIogvWn913fwnDrMbujcNU22MCMLqBXJ2i5Fb2lC52CqV3G5rGrCH8IlSIr8ADD21X0vx0N7WQo73poBJt/OSdR3DqyqspU4fpWGwifYA9i9l1uY7PTzGa9ZqFIzH0HBsz+fTj+TUy5JUv7BkiWhnxnFUwn3CbwA/osFXd2HGst9o/2UE7hJt+JtkBf9DRq+hjpvyzzlTwoWVI3uV0Fxc='); // colocar string salva aqui para logar automático
 
-// 📦 Inicializa banco SQLite
+const CHAT_ID = BigInt(-1002733614113); // seu grupo (use BigInt pra IDs grandes)
+
 const db = new sqlite3.Database('banco.db', (err) => {
-    if (err) {
-        console.error('❌ Erro ao conectar ao SQLite:', err.message);
-    } else {
-        console.log('🗄️ Banco conectado com sucesso');
-    }
+  if (err) console.error('Erro DB:', err.message);
+  else console.log('🗄️ SQLite conectado');
 });
 
+// Cria tabela caso não exista
 db.run(`
-    CREATE TABLE IF NOT EXISTS vendas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chave TEXT UNIQUE,
-        hash TEXT UNIQUE,
-        valor REAL,
-        utm_source TEXT,
-        utm_medium TEXT,
-        utm_campaign TEXT,
-        utm_content TEXT,
-        utm_term TEXT,
-        orderId TEXT,
-        transaction_id TEXT,
-        ip TEXT,
-        userAgent TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+  CREATE TABLE IF NOT EXISTS vendas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chave TEXT UNIQUE,
+    hash TEXT UNIQUE,
+    valor REAL,
+    transaction_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
 `);
 
-// 🚀 Inicializa Express (para expor webhook e outros endpoints)
-const app = express();
-app.use(express.json());
+// Funções utilitárias
+function gerarChaveUnica(transaction_id) {
+  return `chave-${transaction_id}`;
+}
+function gerarHash(transaction_id) {
+  return `hash-${transaction_id}`;
+}
 
-// 🤖 Inicializa o bot do Telegram SEM polling, para usar webhook
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID || '-1002733614113';
-
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
-
-// Configura endpoint para webhook do Telegram
-app.post(`/bot${TELEGRAM_BOT_TOKEN}`, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
-
-// Define o webhook para o Telegram
-bot.setWebHook(`${process.env.WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}`)
-    .then(() => console.log('Webhook configurado com sucesso'))
-    .catch(err => console.error('Erro ao configurar webhook:', err));
-
-// ✅ Função para salvar venda corretamente
 function salvarVenda(venda) {
+  return new Promise((resolve, reject) => {
     const sql = `
-        INSERT INTO vendas (
-            chave, hash, valor, utm_source, utm_medium,
-            utm_campaign, utm_content, utm_term,
-            orderId, transaction_id, ip, userAgent
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO vendas (chave, hash, valor, transaction_id)
+      VALUES (?, ?, ?, ?)
     `;
-
     const valores = [
-        venda.chave,
-        venda.hash,
-        venda.valor,
-        venda.utm_source,
-        venda.utm_medium,
-        venda.utm_campaign,
-        venda.utm_content,
-        venda.utm_term,
-        venda.orderId,
-        venda.transaction_id,
-        venda.ip,
-        venda.userAgent
+      venda.chave,
+      venda.hash,
+      venda.valor,
+      venda.transaction_id
     ];
-
-    db.run(sql, valores, function (err) {
-        if (err) {
-            console.error('❌ Erro ao salvar venda:', err.message);
-        } else {
-            console.log('✅ Venda salva no SQLite com ID:', this.lastID);
-        }
+    db.run(sql, valores, function(err) {
+      if (err) reject(err);
+      else resolve(this.lastID);
     });
+  });
 }
 
-// 🗝️ Funções utilitárias
-function gerarChaveUnica({ transaction_id }) {
-    return `chave-${transaction_id}`;
-}
-
-function gerarHash({ transaction_id }) {
-    return `hash-${transaction_id}`;
-}
-
-async function vendaExiste(hash) {
-    return new Promise((resolve, reject) => {
-        const sql = 'SELECT COUNT(*) AS total FROM vendas WHERE hash = ?';
-        db.get(sql, [hash], (err, row) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(row.total > 0);
-            }
-        });
+function vendaExiste(hash) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT 1 FROM vendas WHERE hash = ? LIMIT 1', [hash], (err, row) => {
+      if (err) reject(err);
+      else resolve(!!row);
     });
+  });
 }
 
-// 📥 Escuta mensagens do Telegram
-bot.on('message', async (msg) => {
-    console.log("📨 Mensagem recebida:", msg);
-    console.log('===============================');
-    console.log('📨 Mensagem recebida:', JSON.stringify(msg, null, 2));
-    console.log('===============================');
-    if (msg.chat.id.toString() !== CHAT_ID) return;
+(async () => {
+  console.log('Iniciando userbot...');
+  const client = new TelegramClient(stringSession, apiId, apiHash, {
+    connectionRetries: 5,
+  });
 
-    const texto = msg.text || '';
+  await client.start({
+    phoneNumber: async () => await input.text('Digite seu número com código do país (ex: +55xxxxxxxxxx): '),
+    password: async () => await input.text('Digite a senha 2FA, se tiver: '),
+    phoneCode: async () => await input.text('Digite o código que recebeu no Telegram: '),
+    onError: (err) => console.log('Erro no login:', err),
+  });
+
+  console.log('✅ Userbot conectado!');
+
+  console.log('Salve essa Session String para login automático no futuro:\n', client.session.save());
+
+  client.addEventHandler(async (event) => {
+    const message = event.message;
+    if (!message) return;
+
+    // Só processa mensagens no seu grupo
+    const chat = await message.getChat();
+    if (chat.id !== CHAT_ID) return;
+
+    const texto = message.message || '';
+    if (!texto) return;
+
+    console.log('Mensagem no grupo:', texto);
+
+    // Regex para ID transação e valor
+    const idRegex = /ID Transação Gateway[:：]?\s*([a-zA-Z0-9-]+)/i;
+    const valorRegex = /Valor Líquido[:：]?\s*R\$?\s*([\d.,]+)/i;
+
+    const idMatch = texto.match(idRegex);
+    const valorMatch = texto.match(valorRegex);
+
+    if (!idMatch || !valorMatch) {
+      console.log('Mensagem não contém dados de venda');
+      return;
+    }
 
     try {
-        // Regex para pegar ID Gateway e Valor Líquido
-        const idRegex = /ID Transação Gateway[:：]?\s*([a-zA-Z0-9-]+)/i;
-        const valorRegex = /Valor Líquido[:：]?\s*R\$?\s*([\d.,]+)/i;
+      const transaction_id = idMatch[1].trim();
+      const valorNum = parseFloat(valorMatch[1].replace('.', '').replace(',', '.').trim());
 
-        const idMatch = texto.match(idRegex);
-        const valorMatch = texto.match(valorRegex);
+      const chave = gerarChaveUnica(transaction_id);
+      const hash = gerarHash(transaction_id);
 
-        if (!idMatch || !valorMatch) {
-            console.log('⚠️ Mensagem não contém dados de venda.');
-            return;
-        }
+      const jaExiste = await vendaExiste(hash);
+      if (jaExiste) {
+        console.log('Venda já existe no banco, ignorando.');
+        return;
+      }
 
-        const transaction_id = idMatch[1].trim();
-        const valorNum = parseFloat(valorMatch[1].replace(',', '.').trim());
+      await salvarVenda({ chave, hash, valor: valorNum, transaction_id });
+      console.log(`✅ Venda salva: transaction_id=${transaction_id} valor=R$${valorNum.toFixed(2)}`);
 
-        const chave = gerarChaveUnica({ transaction_id });
-        const hash = gerarHash({ transaction_id });
-
-        const jaExiste = await vendaExiste(hash);
-        if (jaExiste) {
-            console.log('🔁 Venda já existe no banco.');
-            return;
-        }
-
-        const orderId = 'pedido-' + Date.now();
-
-        // Datas em UTC formato "YYYY-MM-DD HH:mm:ss"
-        const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
-
-        // Exemplo de trackingParameters — ajustar conforme dados reais se tiver
-        const trackingParameters = {
-            src: null,
-            sck: null,
-            utm_source: null,
-            utm_campaign: null,
-            utm_medium: null,
-            utm_content: null,
-            utm_term: null
-        };
-
-        // Comissão exemplo: sem taxa de gateway, full valor para vendedor
-        const commission = {
-            totalPriceInCents: Math.round(valorNum * 100),
-            gatewayFeeInCents: 0,
-            userCommissionInCents: Math.round(valorNum * 100),
-        };
-
-        // Payload UTMify para Pix pago
-        const payload = {
-            orderId,
-            platform: 'PushinPay',
-            paymentMethod: 'pix',
-            status: 'paid',
-            createdAt: agoraUtc,
-            approvedDate: agoraUtc,
-            refundedAt: null,
-            customer: {
-                name: "ClienteVIP",
-                email: "cliente@email.com",
-                phone: null,
-                document: null,
-                country: 'BR',
-                ip: 'bot'
-            },
-            products: [
-                {
-                    id: 'produto-1',
-                    name: 'Acesso VIP',
-                    planId: null,
-                    planName: null,
-                    quantity: 1,
-                    priceInCents: Math.round(valorNum * 100)
-                }
-            ],
-            trackingParameters,
-            commission,
-            isTest: false
-        };
-
-        const response = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
-            headers: {
-                'x-api-token': process.env.API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        salvarVenda({
-            chave,
-            hash,
-            valor: valorNum,
-            utm_source: trackingParameters.utm_source,
-            utm_medium: trackingParameters.utm_medium,
-            utm_campaign: trackingParameters.utm_campaign,
-            utm_content: trackingParameters.utm_content,
-            utm_term: trackingParameters.utm_term,
-            orderId,
-            transaction_id,
-            ip: 'bot',
-            userAgent: 'telegram-bot'
-        });
-
-        console.log('✅ Pedido criado na UTMify:', response.data);
-
-    } catch (err) {
-        console.error('❌ Erro ao processar mensagem do bot:', err.message);
+    } catch (e) {
+      console.error('Erro ao salvar venda:', e);
     }
-});
 
-// 🚀 Sobe o servidor Express na porta 3000 ou variável PORT
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+  }, new (require('telegram/events').NewMessage)());
+
+})();
