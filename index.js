@@ -4,6 +4,7 @@ const express = require('express');
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
+const moment = require('moment');
 
 // 📦 Inicializa banco SQLite
 const db = new sqlite3.Database('banco.db', (err) => {
@@ -114,7 +115,6 @@ bot.on('message', async (msg) => {
         const transaction_id = idMatch[1].trim();
         const valorNum = parseFloat(valorMatch[1].replace(',', '.').trim());
 
-        // Cria chave e hash
         const chave = gerarChaveUnica({ transaction_id });
         const hash = gerarHash({ transaction_id });
 
@@ -125,44 +125,60 @@ bot.on('message', async (msg) => {
         }
 
         const orderId = 'pedido-' + Date.now();
-        const agora = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-        // Monta payload UTMify
+        // Datas em UTC formato "YYYY-MM-DD HH:mm:ss"
+        const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
+
+        // Exemplo de trackingParameters — ajustar conforme dados reais se tiver
+        const trackingParameters = {
+            src: null,
+            sck: null,
+            utm_source: null,
+            utm_campaign: null,
+            utm_medium: null,
+            utm_content: null,
+            utm_term: null
+        };
+
+        // Comissão exemplo: sem taxa de gateway, full valor para vendedor
+        const commission = {
+            totalPriceInCents: Math.round(valorNum * 100),
+            gatewayFeeInCents: 0,
+            userCommissionInCents: Math.round(valorNum * 100),
+        };
+
+        // Payload UTMify para Pix pago
         const payload = {
             orderId,
             platform: 'PushinPay',
             paymentMethod: 'pix',
             status: 'paid',
-            createdAt: agora,
-            approvedDate: agora,
+            createdAt: agoraUtc,
+            approvedDate: agoraUtc,
             refundedAt: null,
             customer: {
                 name: "ClienteVIP",
                 email: "cliente@email.com",
                 phone: null,
                 document: null,
-                country: 'BR'
+                country: 'BR',
+                ip: 'bot'
             },
             products: [
                 {
                     id: 'produto-1',
                     name: 'Acesso VIP',
-                    planId: 'vip-acesso',
-                    planName: 'Acesso VIP Mensal',
+                    planId: null,
+                    planName: null,
                     quantity: 1,
                     priceInCents: Math.round(valorNum * 100)
                 }
             ],
-            trackingParameters: {},
-            commission: {
-                totalPriceInCents: Math.round(valorNum * 100),
-                gatewayFeeInCents: 0,
-                userCommissionInCents: Math.round(valorNum * 100)
-            },
+            trackingParameters,
+            commission,
             isTest: false
         };
 
-        // 🔗 Envia pedido para UTMify
         const response = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
             headers: {
                 'x-api-token': process.env.API_KEY,
@@ -170,16 +186,15 @@ bot.on('message', async (msg) => {
             }
         });
 
-        // 💾 Salva venda no banco local
         salvarVenda({
             chave,
             hash,
             valor: valorNum,
-            utm_source: null,
-            utm_medium: null,
-            utm_campaign: null,
-            utm_content: null,
-            utm_term: null,
+            utm_source: trackingParameters.utm_source,
+            utm_medium: trackingParameters.utm_medium,
+            utm_campaign: trackingParameters.utm_campaign,
+            utm_content: trackingParameters.utm_content,
+            utm_term: trackingParameters.utm_term,
             orderId,
             transaction_id,
             ip: 'bot',
