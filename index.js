@@ -1,103 +1,48 @@
-const express = require('express');
-const axios = require('axios');
-require('dotenv').config();
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const crypto = require('crypto');
+// ⏬ Adiciona o Telegram Bot para escutar o grupo
+const TelegramBot = require('node-telegram-bot-api');
 
-const app = express();
-app.use(express.json());
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID || '-1002733614113';
 
-// 📦 Banco de dados
-const dbPath = path.resolve(__dirname, 'banco.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-        console.error('Erro ao conectar no banco:', err.message);
-    } else {
-        console.log('🗄️ Banco conectado com sucesso');
-    }
-});
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-// 🔧 Cria tabela se não existir (com IP e User-Agent)
-db.run(`CREATE TABLE IF NOT EXISTS vendas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chave TEXT,
-    hash TEXT UNIQUE,
-    valor REAL,
-    utm_source TEXT,
-    utm_medium TEXT,
-    utm_campaign TEXT,
-    utm_content TEXT,
-    utm_term TEXT,
-    orderId TEXT,
-    timestamp INTEGER,
-    ip TEXT,
-    user_agent TEXT
-)`);
+console.log('🤖 Bot Telegram rodando...');
 
-// 🔑 Função para gerar chave única
-function gerarChaveUnica({ valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip, userAgent }) {
-    return `${valor}|${utm_source}|${utm_medium}|${utm_campaign}|${utm_content}|${utm_term}|${ip}|${userAgent}`;
-}
+bot.on('message', async (msg) => {
+    if (msg.chat.id.toString() !== CHAT_ID) return;
 
-// 🔐 Função para gerar hash
-function gerarHash({ valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip, userAgent }) {
-    return crypto
-        .createHash('sha256')
-        .update(`${valor}-${utm_source}-${utm_medium}-${utm_campaign}-${utm_content}-${utm_term}-${ip}-${userAgent}`)
-        .digest('hex');
-}
-
-// 🔍 Verifica se já existe no banco nos últimos 2 dias
-function vendaExiste(hash) {
-    const doisDiasEmSegundos = 2 * 24 * 60 * 60;
-    const agora = Math.floor(Date.now() / 1000);
-    const limite = agora - doisDiasEmSegundos;
-
-    return new Promise((resolve, reject) => {
-        db.get(`SELECT * FROM vendas WHERE hash = ? AND timestamp >= ?`, [hash, limite], (err, row) => {
-            if (err) reject(err);
-            resolve(!!row);
-        });
-    });
-}
-
-// 💾 Salva venda no banco
-function salvarVenda({ chave, hash, valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, orderId, ip, userAgent }) {
-    const timestamp = Math.floor(Date.now() / 1000);
-    db.run(`INSERT INTO vendas (chave, hash, valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, orderId, timestamp, ip, user_agent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [chave, hash, valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, orderId, timestamp, ip, userAgent]);
-}
-
-// 🚦 Endpoint principal
-app.get('/marcar-venda', async (req, res) => {
-    const { valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term } = req.query;
-
-    if (!valor) {
-        return res.status(400).json({ error: 'Parâmetro valor é obrigatório' });
-    }
-
-    const valorNum = parseFloat(valor);
-    if (isNaN(valorNum)) {
-        return res.status(400).json({ error: 'Valor inválido' });
-    }
-
-    const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    const userAgent = req.headers['user-agent'] || 'desconhecido';
-
-    const chave = gerarChaveUnica({ valor: valorNum, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip: ipCliente, userAgent });
-    const hash = gerarHash({ valor: valorNum, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip: ipCliente, userAgent });
-    const orderId = 'pedido-' + Date.now();
-    const agora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const texto = msg.text || '';
 
     try {
-        const jaExiste = await vendaExiste(hash);
+        // Regex para pegar ID Gateway e Valor Líquido
+        const idRegex = /ID Transação Gateway:\s*([^\n]+)/i;
+        const valorRegex = /Valor Líquido:\s*R\$([\d,.]+)/i;
 
-        if (jaExiste) {
-            return res.status(200).json({ success: false, message: '⚠️ Venda já registrada anteriormente (dentro de 2 dias)' });
+        const idMatch = texto.match(idRegex);
+        const valorMatch = texto.match(valorRegex);
+
+        if (!idMatch || !valorMatch) {
+            console.log('⚠️ Mensagem não contém dados de venda.');
+            return;
         }
 
+        const transaction_id = idMatch[1].trim();
+        const valorNum = parseFloat(valorMatch[1].replace(',', '.').trim());
+
+        // Cria hash igual ao da rota
+        const chave = gerarChaveUnica({ transaction_id });
+        const hash = gerarHash({ transaction_id });
+
+        const jaExiste = await vendaExiste(hash);
+        if (jaExiste) {
+            console.log('🔁 Venda já existe no banco.');
+            return;
+        }
+
+        const orderId = 'pedido-' + Date.now();
+        const agora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+        // Monta payload UTMify
         const payload = {
             orderId,
             platform: 'PushinPay',
@@ -123,15 +68,7 @@ app.get('/marcar-venda', async (req, res) => {
                     priceInCents: Math.round(valorNum * 100)
                 }
             ],
-            trackingParameters: {
-                src: null,
-                sck: null,
-                utm_source: utm_source || null,
-                utm_campaign: utm_campaign || null,
-                utm_medium: utm_medium || null,
-                utm_content: utm_content || null,
-                utm_term: utm_term || null
-            },
+            trackingParameters: {},
             commission: {
                 totalPriceInCents: Math.round(valorNum * 100),
                 gatewayFeeInCents: 0,
@@ -151,111 +88,20 @@ app.get('/marcar-venda', async (req, res) => {
             chave,
             hash,
             valor: valorNum,
-            utm_source,
-            utm_medium,
-            utm_campaign,
-            utm_content,
-            utm_term,
+            utm_source: null,
+            utm_medium: null,
+            utm_campaign: null,
+            utm_content: null,
+            utm_term: null,
             orderId,
-            ip: ipCliente,
-            userAgent
+            transaction_id,
+            ip: 'bot',
+            userAgent: 'telegram-bot'
         });
 
-        return res.status(200).json({
-            success: true,
-            message: '✅ Pedido criado e registrado com sucesso na UTMify',
-            data: response.data
-        });
+        console.log('✅ Pedido criado na UTMify:', response.data);
 
-    } catch (error) {
-        console.error('Erro ao criar pedido:', error.response?.data || error.message);
-        return res.status(500).json({
-            error: 'Erro ao criar pedido',
-            details: error.response?.data || error.message
-        });
+    } catch (err) {
+        console.error('❌ Erro ao processar mensagem do bot:', err.message);
     }
-});
-
-// 🔍 Endpoint para listar vendas (JSON)
-app.get('/listar-vendas', (req, res) => {
-    db.all(`SELECT * FROM vendas ORDER BY timestamp DESC`, (err, rows) => {
-        if (err) {
-            console.error('Erro ao buscar vendas:', err.message);
-            return res.status(500).json({ error: 'Erro ao buscar vendas' });
-        }
-        res.json(rows);
-    });
-});
-
-// 🖥️ Painel web para visualizar vendas
-app.get('/painel', (req, res) => {
-    db.all(`SELECT * FROM vendas ORDER BY timestamp DESC`, (err, rows) => {
-        if (err) {
-            console.error('Erro ao buscar vendas:', err.message);
-            return res.status(500).send('Erro ao buscar vendas');
-        }
-
-        const html = `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <title>Painel de Vendas</title>
-            <style>
-                body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
-                h1 { color: #333; }
-                table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-                th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
-                th { background: #007bff; color: white; }
-                tr:nth-child(even) { background: #f9f9f9; }
-                tr:hover { background: #e0f7fa; }
-            </style>
-        </head>
-        <body>
-            <h1>Painel de Vendas</h1>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Order ID</th>
-                        <th>Valor</th>
-                        <th>UTM Source</th>
-                        <th>UTM Medium</th>
-                        <th>UTM Campaign</th>
-                        <th>UTM Content</th>
-                        <th>UTM Term</th>
-                        <th>IP</th>
-                        <th>User-Agent</th>
-                        <th>Data</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows.map(v => `
-                        <tr>
-                            <td>${v.id}</td>
-                            <td>${v.orderId}</td>
-                            <td>R$ ${v.valor.toFixed(2)}</td>
-                            <td>${v.utm_source || ''}</td>
-                            <td>${v.utm_medium || ''}</td>
-                            <td>${v.utm_campaign || ''}</td>
-                            <td>${v.utm_content || ''}</td>
-                            <td>${v.utm_term || ''}</td>
-                            <td>${v.ip || ''}</td>
-                            <td>${v.user_agent || ''}</td>
-                            <td>${new Date(v.timestamp * 1000).toLocaleString('pt-BR')}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </body>
-        </html>
-        `;
-        res.send(html);
-    });
-});
-
-// 🚀 Inicia servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });

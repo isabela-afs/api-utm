@@ -1,15 +1,27 @@
 {
-  "name": "utmify-backend",
+  "name": "vendas-pushinpay-bot",
   "version": "1.0.0",
-  "description": "Backend para integração com UTMify",
+  "description": "API + Bot Telegram para registrar vendas PushinPay e criar pedidos na UTMify",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "express",
+    "telegram-bot",
+    "pushinpay",
+    "utmify",
+    "sqlite",
+    "node"
+  ],
+  "author": "Seu Nome",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.8",
+    "axios": "^1.6.7",
     "dotenv": "^16.4.5",
-    "express": "^4.18.2",
-    "sqlite3": "^5.1.7"
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.6",
+    "node-telegram-bot-api": "^0.61.0"
   }
 }
