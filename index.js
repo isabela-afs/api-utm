@@ -1,4 +1,7 @@
-// ⏬ Adiciona o Telegram Bot para escutar o grupo
+require('dotenv').config();
+
+const express = require('express');
+const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
