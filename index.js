@@ -108,6 +108,8 @@ client.addEventHandler(async (event) => {
   if (!message) return;
 
   const chat = await message.getChat();
+  console.log('🟣 Mensagem do chat:', chat.id, chat.title || chat.username || '[sem título]');
+  console.log('📝 Conteúdo:', message.message || '[sem texto]');
   if (chat.id !== CHAT_ID) return;
 
   const texto = message.message || '';
@@ -226,5 +228,5 @@ client.addEventHandler(async (event) => {
     }
   }
 
-}, new NewMessage({ chats: [CHAT_ID], incoming: true, outgoing: true }));
+}, new NewMessage({ incoming: true, outgoing: true }));
 })();
