@@ -121,6 +121,8 @@ client.addEventHandler(async (event) => {
 
   const idMatch = texto.match(idRegex);
   const valorMatch = texto.match(valorRegex);
+  console.log('idMatch:', idMatch);
+  console.log('valorMatch:', valorMatch);
 
   if (!idMatch || !valorMatch) {
     console.log('⚠️ Mensagem sem dados de venda.');
