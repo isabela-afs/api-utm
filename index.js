@@ -108,6 +108,8 @@ function vendaExiste(hash) {
     if (!message) return;
 
     const chat = await message.getChat();
+    console.log('🟣 Mensagem recebida de:', chat.id);
+    console.log('📝 Conteúdo:', message.message || message.text || '[sem texto]');
     if (chat.id !== CHAT_ID) return;
 
     const texto = message.message || '';
@@ -214,5 +216,5 @@ function vendaExiste(hash) {
       console.error('❌ Erro ao processar mensagem:', err.message);
     }
 
-  }, new NewMessage());
+  }, new NewMessage({ incoming: true, outgoing: true }));
 })();
