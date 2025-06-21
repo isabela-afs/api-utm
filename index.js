@@ -96,14 +96,17 @@ async function vendaExiste(hash) {
 // 📥 Escuta mensagens do Telegram
 bot.on('message', async (msg) => {
     console.log("📨 Mensagem recebida:", msg);
+    console.log('===============================');
+    console.log('📨 Mensagem recebida:', JSON.stringify(msg, null, 2));
+    console.log('===============================');
     if (msg.chat.id.toString() !== CHAT_ID) return;
 
     const texto = msg.text || '';
 
     try {
         // Regex para pegar ID Gateway e Valor Líquido
-        const idRegex = /ID Transação Gateway:\s*([^\n]+)/i;
-        const valorRegex = /Valor Líquido:\s*R\$([\d,.]+)/i;
+        const idRegex = /ID Transação Gateway[:：]?\s*([a-zA-Z0-9-]+)/i;
+        const valorRegex = /Valor Líquido[:：]?\s*R\$?\s*([\d.,]+)/i;
 
         const idMatch = texto.match(idRegex);
         const valorMatch = texto.match(valorRegex);
