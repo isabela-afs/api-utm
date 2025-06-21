@@ -6,6 +6,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
 const moment = require('moment');
 
+
 // 📦 Inicializa banco SQLite
 const db = new sqlite3.Database('banco.db', (err) => {
     if (err) {
@@ -14,6 +15,25 @@ const db = new sqlite3.Database('banco.db', (err) => {
         console.log('🗄️ Banco conectado com sucesso');
     }
 });
+
+db.run(`
+    CREATE TABLE IF NOT EXISTS vendas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chave TEXT UNIQUE,
+        hash TEXT UNIQUE,
+        valor REAL,
+        utm_source TEXT,
+        utm_medium TEXT,
+        utm_campaign TEXT,
+        utm_content TEXT,
+        utm_term TEXT,
+        orderId TEXT,
+        transaction_id TEXT,
+        ip TEXT,
+        userAgent TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`);
 
 // 🚀 Inicializa Express (para expor webhook e outros endpoints)
 const app = express();
