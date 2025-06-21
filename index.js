@@ -3,7 +3,22 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
+const sqlite3 = require('sqlite3').verbose();
 
+// 📦 Inicializa banco SQLite
+const db = new sqlite3.Database('banco.db', (err) => {
+    if (err) {
+        console.error('❌ Erro ao conectar ao SQLite:', err.message);
+    } else {
+        console.log('🗄️ Banco conectado com sucesso');
+    }
+});
+
+// 🚀 Inicializa Express (caso queira expor endpoints depois)
+const app = express();
+app.use(express.json());
+
+// 🤖 Inicializa o bot do Telegram
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID || '-1002733614113';
 
@@ -11,6 +26,64 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
 console.log('🤖 Bot Telegram rodando...');
 
+// ✅ Função para salvar venda corretamente
+function salvarVenda(venda) {
+    const sql = `
+        INSERT INTO vendas (
+            chave, hash, valor, utm_source, utm_medium,
+            utm_campaign, utm_content, utm_term,
+            orderId, transaction_id, ip, userAgent
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const valores = [
+        venda.chave,
+        venda.hash,
+        venda.valor,
+        venda.utm_source,
+        venda.utm_medium,
+        venda.utm_campaign,
+        venda.utm_content,
+        venda.utm_term,
+        venda.orderId,
+        venda.transaction_id,
+        venda.ip,
+        venda.userAgent
+    ];
+
+    db.run(sql, valores, function (err) {
+        if (err) {
+            console.error('❌ Erro ao salvar venda:', err.message);
+        } else {
+            console.log('✅ Venda salva no SQLite com ID:', this.lastID);
+        }
+    });
+}
+
+// 🗝️ Exemplo de funções utilitárias (simulação, ajuste conforme seu código real)
+function gerarChaveUnica({ transaction_id }) {
+    return `chave-${transaction_id}`;
+}
+
+function gerarHash({ transaction_id }) {
+    return `hash-${transaction_id}`;
+}
+
+async function vendaExiste(hash) {
+    return new Promise((resolve, reject) => {
+        const sql = 'SELECT COUNT(*) AS total FROM vendas WHERE hash = ?';
+        db.get(sql, [hash], (err, row) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(row.total > 0);
+            }
+        });
+    });
+}
+
+// 📥 Escuta mensagens do Telegram
 bot.on('message', async (msg) => {
     if (msg.chat.id.toString() !== CHAT_ID) return;
 
@@ -32,7 +105,7 @@ bot.on('message', async (msg) => {
         const transaction_id = idMatch[1].trim();
         const valorNum = parseFloat(valorMatch[1].replace(',', '.').trim());
 
-        // Cria hash igual ao da rota
+        // Cria chave e hash
         const chave = gerarChaveUnica({ transaction_id });
         const hash = gerarHash({ transaction_id });
 
@@ -80,6 +153,7 @@ bot.on('message', async (msg) => {
             isTest: false
         };
 
+        // 🔗 Envia pedido para UTMify
         const response = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
             headers: {
                 'x-api-token': process.env.API_KEY,
@@ -87,6 +161,7 @@ bot.on('message', async (msg) => {
             }
         });
 
+        // 💾 Salva venda no banco local
         salvarVenda({
             chave,
             hash,
@@ -107,4 +182,10 @@ bot.on('message', async (msg) => {
     } catch (err) {
         console.error('❌ Erro ao processar mensagem do bot:', err.message);
     }
+});
+
+// 🚀 Se quiser subir o Express junto:
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
