@@ -5,12 +5,15 @@ const input = require('input');
 const sqlite3 = require('sqlite3').verbose();
 const moment = require('moment');
 const axios = require('axios');
+const http = require('http');
 require('dotenv').config();
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
 const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr/i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfEwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0/Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRzKnpngW63TehCJDxD/v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc=');
 const CHAT_ID = BigInt(-1002733614113);
+
+const PORT = process.env.PORT || 3000;
 
 const db = new sqlite3.Database('banco.db', err => {
     if (err) console.error('Erro DB ao conectar:', err.message);
@@ -286,4 +289,15 @@ function vendaExiste(hash) {
         }
 
     }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
+
+    const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot está ativo e monitorando Telegram.\n');
+    });
+
+server.listen(PORT, () => {
+    console.log(`🌐 Servidor HTTP escutando na porta ${PORT}.`);
+    console.log('Este servidor ajuda a manter o bot ativo em plataformas de hospedagem.');
+    });
+    
 })();
