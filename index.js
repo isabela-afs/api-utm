@@ -117,8 +117,8 @@ client.addEventHandler(async (event) => {
   console.log('📨 Nova mensagem:', texto);
 
   // Regex para extrair dados
-  const idRegex = /ID Transação Gateway:\s*([a-zA-Z0-9-]+)/i;
-  const valorRegex = /Valor Líquido:\s*R?\$?([\d.,]+)/i;
+  const idRegex = /Transa(?:ç|c)ão\s+Gateway[:：]?\s*([a-zA-Z0-9-]+)/i;
+  const valorRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
 
   const idMatch = texto.match(idRegex);
   const valorMatch = texto.match(valorRegex);
