@@ -114,6 +114,7 @@ client.addEventHandler(async (event) => {
   if (chat.id !== CHAT_ID) return;
 
   const texto = message.message || '';
+  console.log('🧪 Texto recebido:', JSON.stringify(texto));
   console.log('📨 Nova mensagem:', texto);
 
   // Regex para extrair dados
