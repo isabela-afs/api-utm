@@ -10,7 +10,7 @@ require('dotenv').config();
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
 const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABuz+1Q9feCvA+Dip2wXs69msgn5aX2eNW5vI/EjRxWejG6P7wj+LQLFz3onE4DBASe09EyvG1OIsdbaNa4V7jMw3ogS2LM35YpcynV/VNVT8a3HNfNc3hQkQanlTTHFMWQcmIogvWn913fwnDrMbujcNU22MCMLqBXJ2i5Fb2lC52CqV3G5rGrCH8IlSIr8ADD21X0vx0N7WQo73poBJt/OSdR3DqyqspU4fpWGwifYA9i9l1uY7PTzGa9ZqFIzH0HBsz+fTj+TUy5JUv7BkiWhnxnFUwn3CbwA/osFXd2HGst9o/2UE7hJt+JtkBf9DRq+hjpvyzzlTwoWVI3uV0Fxc=');
-const CHAT_ID = BigInt(2733614113);
+const CHAT_ID = BigInt(-1002733614113);
 
 // SQLite
 const db = new sqlite3.Database('banco.db', err => {
@@ -46,6 +46,7 @@ function gerarHash({ transaction_id }) {
 }
 
 function salvarVenda(venda) {
+  console.log('💾 Salvando venda no banco...');
   const sql = `
     INSERT INTO vendas (
       chave, hash, valor, utm_source, utm_medium,
@@ -116,13 +117,13 @@ client.addEventHandler(async (event) => {
   console.log('📨 Nova mensagem:', texto);
 
   // Regex para extrair dados
-  const idRegex = /ID Transação Gateway:?\s*([a-zA-Z0-9-]+)/i;
-  const valorRegex = /Valor Líquido:?\s*R?\$?([\d.,]+)/i;
+  const idRegex = /ID Transação Gateway:\s*([a-zA-Z0-9-]+)/i;
+  const valorRegex = /Valor Líquido:\s*R?\$?([\d.,]+)/i;
 
   const idMatch = texto.match(idRegex);
   const valorMatch = texto.match(valorRegex);
-  console.log('idMatch:', idMatch);
-  console.log('valorMatch:', valorMatch);
+  console.log('🧩 ID transação:', idMatch ? idMatch[1] : '❌ Não encontrado');
+  console.log('💰 Valor extraído:', valorMatch ? valorMatch[1] : '❌ Não encontrado');
 
   if (!idMatch || !valorMatch) {
     console.log('⚠️ Mensagem sem dados de venda.');
