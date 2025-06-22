@@ -9,8 +9,8 @@ require('dotenv').config();
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
-const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABuz+1Q9feCvA+Dip2wXs69msgn5aX2eNW5vI/EjRxWejG6P7wj+LQLFz3onE4DBASe09EyvG1OIsdbaNa4V7jMw3ogS2LM35YpcynV/VNVT8a3HNfNc3hQkQanlTTHFMWQcmIogvWn913fwnDrMbujcNU22MCMLqBXJ2i5Fb2lC52CqV3G5rGrCH8IlSIr8ADD21X0vx0N7WQo73poBJt/OSdR3DqyqspU4fpWGwifYA9i9l1uY7PTzGa9ZqFIzH0HBsz+fTj+TUy5JUv7BkiWhnxnFUwn3CbwA/osFXd2HGst9o/2UE7hJt+JtkBf9DRq+hjpvyzzlTwoWVI3uV0Fxc=');
-const CHAT_ID = BigInt(-1002733614113);
+const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABuz+1Q9feCvA+Dip2wXs69msgn5aX2eNW5vI/EjRxWejG6P7wj+LQLFz3onE4DBASe09EyvG1OIsdbaNa4V7jMw3ogS2LM35YpcynV/VNVT8a3HNfNc3hQkQanlTTHFMWQcmIogvWn913fwnDrMbujcNU22MCMLqBXJ2i5Fb2lC52CqV3G5rGrCH8IlSIr8ADD21X0vx0N7WQo73poBJt/OSdR3DqyqspU4fpWGwifYA9i9l1uY7PTzGa9ZqFIzH0HBsz+fTj+TUy5JUv7BkiWhnxnFUwn3CbwA/osFXd2HGst9o/2UE7hJt+JtkBf9DRq+hjpvyzzlTwoWVI3uV0Fxc='); // substitua pela sua se quiser evitar login
+const CHAT_ID = BigInt(-1002733614113); // Chat do grupo privado
 
 // SQLite
 const db = new sqlite3.Database('banco.db', err => {
@@ -104,133 +104,131 @@ function vendaExiste(hash) {
   console.log('✅ Userbot conectado!');
   console.log('🔑 StringSession:', client.session.save());
 
-client.addEventHandler(async (event) => {
-  const message = event.message;
-  if (!message) return;
+  client.addEventHandler(async (event) => {
+    const message = event.message;
+    if (!message) return;
 
-  const chat = await message.getChat();
-  console.log('Chat id:', chat.id.toString());
-  console.log('Mensagem:', message.message);
-  if (chat.id !== CHAT_ID) return;
+    const chat = await message.getChat();
+    if (chat.id !== CHAT_ID) return;
 
-  const texto = message.message || '';
-  console.log('🧪 Texto recebido:', JSON.stringify(texto));
-  console.log('📨 Nova mensagem:', texto);
+    let texto = (message.message || '').replace(/\r/g, '').trim();
+    console.log('📨 Nova mensagem:', JSON.stringify(texto));
 
-  // Regex para extrair dados
-  const idRegex = /Transa(?:ç|c)ão\s+Gateway[:：]?\s*([a-zA-Z0-9-]+)/i;
-  const valorRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
+    // Regex robustos
+    const idRegex = /Transa(?:ç|c)[aã]o\s+Gateway[:：]?\s*([\w-]{10,})/i;
+    const valorRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
 
-  const idMatch = texto.match(idRegex);
-  const valorMatch = texto.match(valorRegex);
-  console.log('🧩 ID transação:', idMatch ? idMatch[1] : '❌ Não encontrado');
-  console.log('💰 Valor extraído:', valorMatch ? valorMatch[1] : '❌ Não encontrado');
+    const idMatch = texto.match(idRegex);
+    const valorMatch = texto.match(valorRegex);
 
-  if (!idMatch || !valorMatch) {
-    console.log('⚠️ Mensagem sem dados de venda.');
-    return;
-  }
+    console.log('🧩 ID transação:', idMatch ? idMatch[1] : '❌ Não encontrado');
+    console.log('💰 Valor extraído:', valorMatch ? valorMatch[1] : '❌ Não encontrado');
 
-  try {
-    const transaction_id = idMatch[1].trim();
-    let valorNum = parseFloat(valorMatch[1].replace(/\./g, '').replace(',', '.').trim());
-
-    if (isNaN(valorNum) || valorNum <= 0) {
-      console.log('⚠️ Valor inválido:', valorMatch[1]);
+    if (!idMatch || !valorMatch) {
+      console.log('⚠️ Mensagem sem dados de venda.');
       return;
     }
 
-    const chave = gerarChaveUnica({ transaction_id });
-    const hash = gerarHash({ transaction_id });
+    try {
+      const transaction_id = idMatch[1].trim();
+      const valorNum = parseFloat(valorMatch[1].replace(/\./g, '').replace(',', '.').trim());
 
-    const jaExiste = await vendaExiste(hash);
-    if (jaExiste) {
-      console.log('🔁 Venda já registrada.');
-      return;
-    }
-
-    const orderId = 'pedido-' + Date.now();
-    const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
-
-    const trackingParameters = {
-      utm_source: null,
-      utm_campaign: null,
-      utm_medium: null,
-      utm_content: null,
-      utm_term: null
-    };
-
-    const commission = {
-      totalPriceInCents: Math.round(valorNum * 100),
-      gatewayFeeInCents: 0,
-      userCommissionInCents: Math.round(valorNum * 100)
-    };
-
-    const payload = {
-      orderId,
-      platform: 'PushinPay',
-      paymentMethod: 'pix',
-      status: 'paid',
-      createdAt: agoraUtc,
-      approvedDate: agoraUtc,
-      refundedAt: null,
-      customer: {
-        name: "ClienteTelegram",
-        email: "cliente@email.com",
-        phone: null,
-        document: null,
-        country: 'BR',
-        ip: 'telegram',
-      },
-      products: [
-        {
-          id: 'produto-1',
-          name: 'Acesso VIP',
-          planId: null,
-          planName: null,
-          quantity: 1,
-          priceInCents: Math.round(valorNum * 100)
-        }
-      ],
-      trackingParameters,
-      commission,
-      isTest: false
-    };
-
-    console.log('📤 Enviando payload para UTMify:', JSON.stringify(payload, null, 2));
-
-    const res = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
-      headers: {
-        'x-api-token': process.env.API_KEY,
-        'Content-Type': 'application/json'
+      if (isNaN(valorNum) || valorNum <= 0) {
+        console.log('⚠️ Valor inválido:', valorMatch[1]);
+        return;
       }
-    });
 
-    console.log('📬 Resposta da UTMify:', res.status, res.data);
-    console.log('📦 Pedido criado na UTMify:', res.data);
+      const chave = gerarChaveUnica({ transaction_id });
+      const hash = gerarHash({ transaction_id });
 
-    salvarVenda({
-      chave,
-      hash,
-      valor: valorNum,
-      utm_source: trackingParameters.utm_source,
-      utm_medium: trackingParameters.utm_medium,
-      utm_campaign: trackingParameters.utm_campaign,
-      utm_content: trackingParameters.utm_content,
-      utm_term: trackingParameters.utm_term,
-      orderId,
-      transaction_id,
-      ip: 'telegram',
-      userAgent: 'userbot'
-    });
+      const jaExiste = await vendaExiste(hash);
+      if (jaExiste) {
+        console.log('🔁 Venda já registrada.');
+        return;
+      }
 
-  } catch (err) {
-    console.error('❌ Erro ao processar mensagem ou enviar para UTMify:', err.message);
-    if (err.response) {
-      console.error('🛑 Código de status:', err.response.status);
-      console.error('📩 Resposta da UTMify:', err.response.data);
+      const orderId = 'pedido-' + Date.now();
+      const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
+
+      const trackingParameters = {
+        utm_source: null,
+        utm_campaign: null,
+        utm_medium: null,
+        utm_content: null,
+        utm_term: null
+      };
+
+      const commission = {
+        totalPriceInCents: Math.round(valorNum * 100),
+        gatewayFeeInCents: 0,
+        userCommissionInCents: Math.round(valorNum * 100)
+      };
+
+      const payload = {
+        orderId,
+        platform: 'PushinPay',
+        paymentMethod: 'pix',
+        status: 'paid',
+        createdAt: agoraUtc,
+        approvedDate: agoraUtc,
+        refundedAt: null,
+        customer: {
+          name: "ClienteTelegram",
+          email: "cliente@email.com",
+          phone: null,
+          document: null,
+          country: 'BR',
+          ip: 'telegram',
+        },
+        products: [
+          {
+            id: 'produto-1',
+            name: 'Acesso VIP',
+            planId: null,
+            planName: null,
+            quantity: 1,
+            priceInCents: Math.round(valorNum * 100)
+          }
+        ],
+        trackingParameters,
+        commission,
+        isTest: false
+      };
+
+      console.log('📤 Enviando payload para UTMify:', JSON.stringify(payload, null, 2));
+
+      const res = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
+        headers: {
+          'x-api-token': process.env.API_KEY,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('📬 Resposta da UTMify:', res.status, res.data);
+      console.log('📦 Pedido criado na UTMify:', res.data);
+
+      salvarVenda({
+        chave,
+        hash,
+        valor: valorNum,
+        utm_source: trackingParameters.utm_source,
+        utm_medium: trackingParameters.utm_medium,
+        utm_campaign: trackingParameters.utm_campaign,
+        utm_content: trackingParameters.utm_content,
+        utm_term: trackingParameters.utm_term,
+        orderId,
+        transaction_id,
+        ip: 'telegram',
+        userAgent: 'userbot'
+      });
+
+    } catch (err) {
+      console.error('❌ Erro ao processar mensagem ou enviar para UTMify:', err.message);
+      if (err.response) {
+        console.error('🛑 Código de status:', err.response.status);
+        console.error('📩 Resposta da UTMify:', err.response.data);
+      }
     }
-  }
 
-}, new NewMessage({ chats: [CHAT_ID], incoming: true }));
+  }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
 })();
