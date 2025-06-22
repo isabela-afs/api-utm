@@ -230,5 +230,5 @@ client.addEventHandler(async (event) => {
     }
   }
 
-}, new NewMessage({ incoming: true }));
+}, new NewMessage({ chats: [CHAT_ID], incoming: true }));
 })();
