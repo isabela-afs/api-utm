@@ -9,7 +9,7 @@ require('dotenv').config();
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
-const stringSession = new StringSession('');
+const stringSession = new StringSession('1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr\i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfEwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0\Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRzKnpngW63TehCJDxD\v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc=');
 const CHAT_ID = BigInt(-1002733614113);
 
 const db = new sqlite3.Database('banco.db', err => {
