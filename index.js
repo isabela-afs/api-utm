@@ -1,20 +1,20 @@
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
-const input = require('input'); // Usado para input de credenciais do Telegram no primeiro login
+const input = require('input');
 const moment = require('moment');
 const axios = require('axios');
 const express = require('express');
-const { Pool } = require('pg'); // Importa o Pool do pg para PostgreSQL
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
-app.use(express.json()); // Middleware para parsear JSON no body das requisições
+app.use(express.json());
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
-const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr/i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfEwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0/Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRyKnpngW63TehCJDxD/v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc='); // Usar variável de ambiente para a sessão também é uma boa prática
-const CHAT_ID = BigInt(-1002733614113); // Certifique-se que este é o ID correto do seu chat no Telegram (grupo de vendas)
+const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr/i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfFwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0/Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRzKnpngW63TehCJDxD/v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc=');
+const CHAT_ID = BigInt(-1002733614113);
 
 const PORT = process.env.PORT || 3000;
 
@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false // Use true em produção se você tiver um certificado SSL válido
+        rejectUnauthorized: false
     }
 });
 
@@ -32,7 +32,7 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
     console.error('❌ Erro inesperado no pool do PostgreSQL:', err);
-    process.exit(-1); // Encerrar o processo em caso de erro fatal no banco
+    process.exit(-1);
 });
 
 // --- FUNÇÃO PARA INICIALIZAR TABELAS NO POSTGRESQL ---
@@ -50,10 +50,10 @@ async function setupDatabase() {
                 utm_campaign TEXT,
                 utm_content TEXT,
                 utm_term TEXT,
-                order_id TEXT, -- Renomeado de orderId para order_id (convenção PostgreSQL)
+                order_id TEXT,
                 transaction_id TEXT,
                 ip TEXT,
-                user_agent TEXT, -- Renomeado de userAgent para user_agent
+                user_agent TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
@@ -62,7 +62,7 @@ async function setupDatabase() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS frontend_utms (
                 id SERIAL PRIMARY KEY,
-                timestamp_ms BIGINT NOT NULL, -- Timestamp do frontend em milissegundos
+                timestamp_ms BIGINT NOT NULL,
                 valor REAL NOT NULL,
                 utm_source TEXT,
                 utm_medium TEXT,
@@ -77,7 +77,7 @@ async function setupDatabase() {
         client.release();
     } catch (err) {
         console.error('❌ Erro ao configurar tabelas no PostgreSQL:', err.message);
-        process.exit(1); // Encerrar se não conseguir configurar o DB
+        process.exit(1);
     }
 }
 
@@ -100,7 +100,7 @@ async function salvarVenda(venda) {
             order_id, transaction_id, ip, user_agent
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (hash) DO NOTHING; -- Evita duplicatas se hash já existir
+        ON CONFLICT (hash) DO NOTHING;
     `;
 
     const valores = [
@@ -138,7 +138,7 @@ async function vendaExiste(hash) {
         return res.rows[0].total > 0;
     } catch (err) {
         console.error('❌ Erro ao verificar venda existente (PostgreSQL):', err.message);
-        return false; // Assume que não existe em caso de erro para não bloquear
+        return false;
     }
 }
 
@@ -171,8 +171,7 @@ async function salvarFrontendUtms(data) {
     }
 }
 
-// AJUSTE SUGERIDO NA FUNÇÃO buscarUtmsPorTempoEValor para corresponder o timestamp e opcionalmente o IP
-async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, windowMs = 120000) { // Janela de 120 segundos (120000ms)
+async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, windowMs = 120000) {
     console.log(`🔎 Buscando UTMs do frontend para timestamp ${targetTimestamp} (janela de ${windowMs / 1000}s)...`);
     const minTimestamp = targetTimestamp - windowMs;
     const maxTimestamp = targetTimestamp + windowMs;
@@ -182,7 +181,7 @@ async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, window
         WHERE timestamp_ms BETWEEN $1 AND $2
     `;
     let params = [minTimestamp, maxTimestamp];
-    let paramIndex = 3; // O próximo índice de parâmetro
+    let paramIndex = 3;
 
     if (targetIp && targetIp !== 'telegram' && targetIp !== 'userbot') {
         sql += ` AND ip = $${paramIndex++}`;
@@ -190,7 +189,7 @@ async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, window
     }
 
     sql += ` ORDER BY ABS(timestamp_ms - $${paramIndex++}) ASC LIMIT 1`;
-    params.push(targetTimestamp); // O timestamp para ordenar pela proximidade
+    params.push(targetTimestamp);
 
     try {
         const res = await pool.query(sql, params);
@@ -206,6 +205,22 @@ async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, window
         return null;
     }
 }
+
+// --- FUNÇÃO PARA LIMPAR DADOS ANTIGOS DA TABELA frontend_utms ---
+async function limparFrontendUtmsAntigos() {
+    console.log('🧹 Iniciando limpeza de UTMs antigos do frontend...');
+    // Apaga registros com mais de 24 horas (ou outro período que faça sentido para você)
+    const cutoffTime = moment().subtract(24, 'hours').valueOf(); // Em milissegundos
+    const sql = `DELETE FROM frontend_utms WHERE timestamp_ms < $1`;
+
+    try {
+        const res = await pool.query(sql, [cutoffTime]);
+        console.log(`🧹 Limpeza de UTMs antigos do frontend: ${res.rowCount || 0} registros removidos.`);
+    } catch (err) {
+        console.error('❌ Erro ao limpar UTMs antigos do frontend:', err.message);
+    }
+}
+
 
 // --- ENDPOINT HTTP PARA RECEBER UTMs DO FRONTEND ---
 app.post('/frontend-utm-data', (req, res) => {
@@ -234,6 +249,11 @@ app.post('/frontend-utm-data', (req, res) => {
     // Configura o banco de dados antes de iniciar o bot
     await setupDatabase();
     limparFrontendUtmsAntigos(); // Limpa ao iniciar também
+
+    // Agendar a limpeza a cada hora (ou outro intervalo)
+    setInterval(limparFrontendUtmsAntigos, 60 * 60 * 1000); // A cada 1 hora
+    console.log('🧹 Limpeza de UTMs antigos agendada para cada 1 hora.');
+
 
     console.log('Iniciando userbot...');
     const client = new TelegramClient(stringSession, apiId, apiHash, {
@@ -302,7 +322,7 @@ app.post('/frontend-utm-data', (req, res) => {
         const idMatch = texto.match(idRegex);
         const valorLiquidoMatch = texto.match(valorLiquidoRegex);
 
-        const telegramMessageTimestamp = message.date * 1000; // Timestamp em milissegundos da mensagem
+        const telegramMessageTimestamp = message.date * 1000;
 
         const nomeMatch = texto.match(nomeCompletoRegex);
         const emailMatch = texto.match(emailRegex);
@@ -313,7 +333,7 @@ app.post('/frontend-utm-data', (req, res) => {
         const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
         const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
         const platform = plataformaPagamentoMatch ? plataformaPagamentoMatch[1].trim() : 'UnknownPlatform';
-        const status = 'paid'; // Assumindo 'paid' pela natureza do grupo de "Pagamento Aprovado"
+        const status = 'paid';
 
         if (!idMatch || !valorLiquidoMatch) {
             console.log('⚠️ Mensagem sem dados completos de venda (ID da Transação Gateway ou Valor Líquido não encontrados).');
@@ -350,7 +370,7 @@ app.post('/frontend-utm-data', (req, res) => {
             // --- BUSCA POR UTMs NO BANCO DE DADOS (BASEADO EM TEMPO/IP) ---
             const matchedFrontendUtms = await buscarUtmsPorTempoEValor(
                 telegramMessageTimestamp,
-                null // Não temos o IP do Telegram para comparar aqui. O IP será o do frontend se encontrado.
+                null
             );
 
             if (matchedFrontendUtms) {
@@ -380,15 +400,15 @@ app.post('/frontend-utm-data', (req, res) => {
                 customer: {
                     name: customerName,
                     email: customerEmail,
-                    phone: null, // Adapte se puder extrair do Telegram
-                    document: null, // Adapte se puder extrair do Telegram
-                    country: 'BR', // Ajuste se for dinâmico
+                    phone: null,
+                    document: null,
+                    country: 'BR',
                     ip: ipClienteFrontend,
                 },
                 products: [
                     {
-                        id: 'acesso-vip-bundle', // ID genérico
-                        name: 'Acesso VIP', // Nome genérico, pode tentar extrair do Telegram
+                        id: 'acesso-vip-bundle',
+                        name: 'Acesso VIP',
                         planId: null,
                         planName: null,
                         quantity: 1,
@@ -398,7 +418,7 @@ app.post('/frontend-utm-data', (req, res) => {
                 trackingParameters: utmsEncontradas,
                 commission: {
                     totalPriceInCents: Math.round(valorLiquidoNum * 100),
-                    gatewayFeeInCents: 0, // Preencha se souber
+                    gatewayFeeInCents: 0,
                     userCommissionInCents: Math.round(valorLiquidoNum * 100),
                     currency: 'BRL'
                 },
@@ -447,7 +467,7 @@ app.post('/frontend-utm-data', (req, res) => {
     }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
 
     // --- MARACUTAIA PARA MANTER O SERVIÇO ATIVO (PING INTERNO) ---
-    const PING_INTERVAL_MS = 30 * 1000; // 30 segundos
+    const PING_INTERVAL_MS = 30 * 1000;
     const SELF_PING_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
     function sendSelfPing() {
