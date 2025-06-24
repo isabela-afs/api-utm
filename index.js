@@ -13,9 +13,7 @@ app.use(express.json());
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
-// Use process.env.TELEGRAM_SESSION. Se não estiver configurado no Render,
-// ele usará a string hardcoded (que deve ser uma sessão VÁLIDA gerada localmente).
-const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr/i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfFwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0/Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRzKnpngW63TehCJDxD/v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc=');
+const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNTQBu6qxH7L+IAAXrxfRYuvnMRA7NGFTrCkFlwRvZD8Y2TtQASU5t5zWxTUmUYiwrYDfucDe/dzN94xiAAmLNia9JvC/RKsPGEuqSuvp79NjxcmxalVlduiRw31nhu62VV5owrD9njDIGgjTA4zdYE7gMzwI7KGLLQj2x31xuJNhtuCku+35Ij5fkYOaufKe56Of8l/QPmzLtHOHc5TAfql3ofpTMhhx8K2Ju6U33rAeXL6sz/WrPrhRlEe7gYBCON5rQtSyn6bneXNXnMCh5yhVqPHw8HVzM2iY2vH5TRXqcgHFvBcxmBDtHNZyGEQsxh352s+BWRUo8ho03+zn0FOSFiQ=');
 const CHAT_ID = BigInt(-1002733614113);
 
 const PORT = process.env.PORT || 3000;
@@ -254,10 +252,16 @@ app.listen(PORT, () => {
     // --- APÓS O SERVIDOR HTTP ESTAR ESCUTANDO, INICIA AS TAREFAS ASSÍNCRONAS ---
     (async () => {
         // Configura o banco de dados
-        await setupDatabase();
-        limparFrontendUtmsAntigos(); // Limpa ao iniciar também
+        try {
+            await setupDatabase();
+            console.log('✅ Configuração do banco de dados concluída.');
+        } catch (dbError) {
+            console.error('❌ Erro fatal na configuração do banco de dados:', dbError.message);
+            process.exit(1);
+        }
 
-        // Agendar a limpeza a cada hora
+        limparFrontendUtmsAntigos();
+
         setInterval(limparFrontendUtmsAntigos, 60 * 60 * 1000);
         console.log('🧹 Limpeza de UTMs antigos agendada para cada 1 hora.');
 
@@ -268,16 +272,14 @@ app.listen(PORT, () => {
 
         try {
             await client.start({
-                // Estes inputs são para o primeiro login. Se TELEGRAM_SESSION estiver preenchido e válido, não aparecerão.
-                // Se o seu bot travar aqui no Render, é porque a stringSession não está válida e ele está esperando input.
-                phoneNumber: async () => { console.log("⚠️ AVISO: Requisição de número de telefone. Certifique-se que TELEGRAM_SESSION está configurado com uma string de sessão válida no Render."); return await input.text('Digite seu número com DDI (ex: +5511987654321): '); },
-                password: async () => { console.log("⚠️ AVISO: Requisição de senha 2FA. Certifique-se que TELEGRAM_SESSION está configurado."); return await input.text('Senha 2FA (se tiver): '); },
-                phoneCode: async () => { console.log("⚠️ AVISO: Requisição de código do Telegram. Certifique-se que TELEGRAM_SESSION está configurado."); return await input.text('Código do Telegram: '); },
+                phoneNumber: async () => input.text('Digite seu número com DDI (ex: +5511987654321): '),
+                password: async () => input.text('Senha 2FA (se tiver): '),
+                phoneCode: async () => input.text('Código do Telegram: '),
                 onError: (err) => console.log('Erro durante o login/start do cliente:', err),
             });
             console.log('✅ Userbot conectado!');
-            // **IMPORTANTE:** Se for o primeiro login no Render e ele te der uma nova string de sessão, COPIE-A E COLOQUE NAS VARIÁVEIS DE AMBIENTE DO RENDER para evitar novos logins interativos.
-            // console.log('🔑 Nova StringSession para .env (após o primeiro login):', client.session.save());
+            // DESCOMENTE A PRÓXIMA LINHA PARA PEGAR A NOVA STRING DE SESSÃO APÓS O LOGIN
+            console.log('🔑 Nova StringSession para .env (após o primeiro login):', client.session.save());
         } catch (error) {
             console.error('❌ Falha ao iniciar o userbot:', error.message);
             process.exit(1);
@@ -375,7 +377,6 @@ app.listen(PORT, () => {
                 };
                 let ipClienteFrontend = 'telegram';
 
-                // --- BUSCA POR UTMs NO BANCO DE DADOS (BASEADO EM TEMPO/IP) ---
                 const matchedFrontendUtms = await buscarUtmsPorTempoEValor(
                     telegramMessageTimestamp,
                     null
@@ -392,7 +393,6 @@ app.listen(PORT, () => {
                 } else {
                     console.log(`⚠️ Nenhuma UTM correspondente encontrada por tempo para ${transaction_id}. Enviando sem UTMs de atribuição.`);
                 }
-                // --- FIM DA BUSCA POR UTMs ---
 
                 const orderId = transaction_id;
                 const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
@@ -473,29 +473,5 @@ app.listen(PORT, () => {
             }
 
         }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
-
-        // --- MARACUTAIA PARA MANTER O SERVIÇO ATIVO (PING INTERNO) ---
-        const PING_INTERVAL_MS = 30 * 1000;
-        const SELF_PING_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-
-        function sendSelfPing() {
-            console.log(`Pinging myself at ${SELF_PING_URL} to stay awake...`);
-            fetch(SELF_PING_URL)
-                .then(res => {
-                    if (res.ok) {
-                        console.log('Self-ping successful. Service should remain active.');
-                    } else {
-                        console.warn(`Self-ping failed with status: ${res.status}.`);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error during self-ping:', error.message);
-                });
-        }
-
-        setInterval(sendSelfPing, PING_INTERVAL_MS);
-        console.log(`Self-ping programado para cada ${PING_INTERVAL_MS / 1000} segundos.`);
-        // --- FIM DA MARACUTAIA ---
-
-    })(); // Fechamento do IIFE que contém a lógica do bot e DB
-}); // Fechamento do app.listen (agora o IIFE está DENTRO dele)
+    })(); // Fechamento do IIFE
+}); // Fechamento do app.listen
