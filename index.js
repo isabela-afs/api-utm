@@ -13,6 +13,8 @@ app.use(express.json());
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
+// Use process.env.TELEGRAM_SESSION. Se não estiver configurado no Render,
+// ele usará a string hardcoded (que deve ser uma sessão VÁLIDA gerada localmente).
 const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu00Kc0Y0I1pzQX3UBNIlr/i0BNXx52vhnSJWQGyiHGdt6D3XEkp9OqGshIA2HOoEbEKKSRUlHdNULxc6qqb2IbaScSTzL2x9FlUiT0+vCVSakP7x7orfFwafLqP8lwePeOzdkjgOgtcf218o9xxnKIL4jDPFAJzfeedwpHYrokJ63CwKQhEbx1hReYs1tDXhweT9qNjguDDRqv35kwT3YkrPETCdJtVjPY1frnUYZVX0/Bx3XMSbdtSRoyJh+P0vc5Xsebp3Y3bRzKnpngW63TehCJDxD/v07hoquWDyQ7KMSP4XQfA9AAhRoXuOa62F3n+oPVgHP8zvlPi6VaMR1bc=');
 const CHAT_ID = BigInt(-1002733614113);
 
@@ -209,8 +211,7 @@ async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, window
 // --- FUNÇÃO PARA LIMPAR DADOS ANTIGOS DA TABELA frontend_utms ---
 async function limparFrontendUtmsAntigos() {
     console.log('🧹 Iniciando limpeza de UTMs antigos do frontend...');
-    // Apaga registros com mais de 24 horas (ou outro período que faça sentido para você)
-    const cutoffTime = moment().subtract(24, 'hours').valueOf(); // Em milissegundos
+    const cutoffTime = moment().subtract(24, 'hours').valueOf();
     const sql = `DELETE FROM frontend_utms WHERE timestamp_ms < $1`;
 
     try {
@@ -244,254 +245,257 @@ app.post('/frontend-utm-data', (req, res) => {
     res.status(200).send('Dados recebidos com sucesso!');
 });
 
-// --- INICIALIZAÇÃO DO USERBOT TELEGRAM ---
-(async () => {
-    // Configura o banco de dados antes de iniciar o bot
-    await setupDatabase();
-    limparFrontendUtmsAntigos(); // Limpa ao iniciar também
 
-    // Agendar a limpeza a cada hora (ou outro intervalo)
-    setInterval(limparFrontendUtmsAntigos, 60 * 60 * 1000); // A cada 1 hora
-    console.log('🧹 Limpeza de UTMs antigos agendada para cada 1 hora.');
+// --- INICIALIZA O SERVIDOR HTTP PRIMEIRO ---
+app.listen(PORT, () => {
+    console.log(`🌐 Servidor HTTP Express escutando na porta ${PORT}.`);
+    console.log('Este servidor ajuda a manter o bot ativo em plataformas de hospedagem e recebe dados do frontend.');
 
+    // --- APÓS O SERVIDOR HTTP ESTAR ESCUTANDO, INICIA AS TAREFAS ASSÍNCRONAS ---
+    (async () => {
+        // Configura o banco de dados
+        await setupDatabase();
+        limparFrontendUtmsAntigos(); // Limpa ao iniciar também
 
-    console.log('Iniciando userbot...');
-    const client = new TelegramClient(stringSession, apiId, apiHash, {
-        connectionRetries: 5,
-    });
+        // Agendar a limpeza a cada hora
+        setInterval(limparFrontendUtmsAntigos, 60 * 60 * 1000);
+        console.log('🧹 Limpeza de UTMs antigos agendada para cada 1 hora.');
 
-    try {
-        await client.start({
-            phoneNumber: async () => await input.text('Digite seu número com DDI (ex: +5511987654321): '),
-            password: async () => await input.text('Senha 2FA (se tiver): '),
-            phoneCode: async () => await input.text('Código do Telegram: '),
-            onError: (err) => console.log('Erro durante o login/start do cliente:', err),
+        console.log('Iniciando userbot...');
+        const client = new TelegramClient(stringSession, apiId, apiHash, {
+            connectionRetries: 5,
         });
-        console.log('✅ Userbot conectado!');
-        // É recomendado salvar a stringSession em uma variável de ambiente após o primeiro login
-        // console.log('🔑 StringSession salva (copie e cole no .env):', client.session.save());
-    } catch (error) {
-        console.error('❌ Falha ao iniciar o userbot:', error.message);
-        return;
-    }
-
-    // --- MANIPULAÇÃO DE MENSAGENS ---
-    client.addEventHandler(async (event) => {
-        const message = event.message;
-        if (!message) return;
-
-        const chat = await message.getChat();
-        const incomingChatId = chat.id;
-
-        let normalizedIncomingChatId = incomingChatId;
-        if (typeof incomingChatId === 'bigint') {
-            if (incomingChatId < 0 && incomingChatId.toString().startsWith('-100')) {
-                normalizedIncomingChatId = BigInt(incomingChatId.toString().substring(4));
-            } else if (incomingChatId < 0) {
-                normalizedIncomingChatId = BigInt(incomingChatId * BigInt(-1));
-            }
-        } else {
-            normalizedIncomingChatId = BigInt(Math.abs(Number(incomingChatId)));
-        }
-
-        let normalizedConfiguredChatId = CHAT_ID;
-        if (typeof CHAT_ID === 'bigint') {
-            if (CHAT_ID < 0 && CHAT_ID.toString().startsWith('-100')) {
-                normalizedConfiguredChatId = BigInt(CHAT_ID.toString().substring(4));
-            } else if (CHAT_ID < 0) {
-                normalizedConfiguredChatId = BigInt(CHAT_ID * BigInt(-1));
-            }
-        } else {
-            normalizedConfiguredChatId = BigInt(Math.abs(Number(CHAT_ID)));
-        }
-
-        if (normalizedIncomingChatId !== normalizedConfiguredChatId) {
-            return;
-        }
-
-        let texto = (message.message || '').replace(/\r/g, '').trim();
-
-        const idRegex = /ID\s+Transa(?:ç|c)[aã]o\s+Gateway[:：]?\s*([\w-]{10,})/i;
-        const valorLiquidoRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
-        const nomeCompletoRegex = /Nome\s+Completo[:：]?\s*(.+)/i;
-        const emailRegex = /E-mail[:：]?\s*(\S+@\S+\.\S+)/i;
-        const metodoPagamentoRegex = /M[ée]todo\s+Pagamento[:：]?\s*(.+)/i;
-        const plataformaPagamentoRegex = /Plataforma\s+Pagamento[:：]?\s*(.+)/i;
-
-
-        const idMatch = texto.match(idRegex);
-        const valorLiquidoMatch = texto.match(valorLiquidoRegex);
-
-        const telegramMessageTimestamp = message.date * 1000;
-
-        const nomeMatch = texto.match(nomeCompletoRegex);
-        const emailMatch = texto.match(emailRegex);
-        const metodoPagamentoMatch = texto.match(metodoPagamentoRegex);
-        const plataformaPagamentoMatch = texto.match(plataformaPagamentoRegex);
-
-        const customerName = nomeMatch ? nomeMatch[1].trim() : "Cliente Desconhecido";
-        const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
-        const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
-        const platform = plataformaPagamentoMatch ? plataformaPagamentoMatch[1].trim() : 'UnknownPlatform';
-        const status = 'paid';
-
-        if (!idMatch || !valorLiquidoMatch) {
-            console.log('⚠️ Mensagem sem dados completos de venda (ID da Transação Gateway ou Valor Líquido não encontrados).');
-            return;
-        }
 
         try {
-            const transaction_id = idMatch[1].trim();
-            const valorLiquidoNum = parseFloat(valorLiquidoMatch[1].replace(/\./g, '').replace(',', '.').trim());
-
-            if (isNaN(valorLiquidoNum) || valorLiquidoNum <= 0) {
-                console.log('⚠️ Valor Líquido numérico inválido ou menor/igual a zero:', valorLiquidoMatch[1]);
-                return;
-            }
-
-            const chave = gerarChaveUnica({ transaction_id });
-            const hash = gerarHash({ transaction_id });
-
-            const jaExiste = await vendaExiste(hash);
-            if (jaExiste) {
-                console.log(`🔁 Venda com hash ${hash} já registrada. Ignorando duplicata.`);
-                return;
-            }
-
-            let utmsEncontradas = {
-                utm_source: null,
-                utm_medium: null,
-                utm_campaign: null,
-                utm_content: null,
-                utm_term: null
-            };
-            let ipClienteFrontend = 'telegram';
-
-            // --- BUSCA POR UTMs NO BANCO DE DADOS (BASEADO EM TEMPO/IP) ---
-            const matchedFrontendUtms = await buscarUtmsPorTempoEValor(
-                telegramMessageTimestamp,
-                null
-            );
-
-            if (matchedFrontendUtms) {
-                utmsEncontradas.utm_source = matchedFrontendUtms.utm_source;
-                utmsEncontradas.utm_medium = matchedFrontendUtms.utm_medium;
-                utmsEncontradas.utm_campaign = matchedFrontendUtms.utm_campaign;
-                utmsEncontradas.utm_content = matchedFrontendUtms.utm_content;
-                utmsEncontradas.utm_term = matchedFrontendUtms.utm_term;
-                ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
-                console.log(`✅ UTMs encontradas via correspondência por tempo para ${transaction_id}.`);
-            } else {
-                console.log(`⚠️ Nenhuma UTM correspondente encontrada por tempo para ${transaction_id}. Enviando sem UTMs de atribuição.`);
-            }
-            // --- FIM DA BUSCA POR UTMs ---
-
-            const orderId = transaction_id;
-            const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
-
-            const payload = {
-                orderId: orderId,
-                platform: platform,
-                paymentMethod: paymentMethod,
-                status: status,
-                createdAt: agoraUtc,
-                approvedDate: agoraUtc,
-                refundedAt: null,
-                customer: {
-                    name: customerName,
-                    email: customerEmail,
-                    phone: null,
-                    document: null,
-                    country: 'BR',
-                    ip: ipClienteFrontend,
-                },
-                products: [
-                    {
-                        id: 'acesso-vip-bundle',
-                        name: 'Acesso VIP',
-                        planId: null,
-                        planName: null,
-                        quantity: 1,
-                        priceInCents: Math.round(valorLiquidoNum * 100)
-                    }
-                ],
-                trackingParameters: utmsEncontradas,
-                commission: {
-                    totalPriceInCents: Math.round(valorLiquidoNum * 100),
-                    gatewayFeeInCents: 0,
-                    userCommissionInCents: Math.round(valorLiquidoNum * 100),
-                    currency: 'BRL'
-                },
-                isTest: false
-            };
-
-            for (const key in payload.trackingParameters) {
-                if (payload.trackingParameters[key] === null || payload.trackingParameters[key] === '') {
-                    payload.trackingParameters[key] = null;
-                }
-            }
-
-            const res = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
-                headers: {
-                    'x-api-token': process.env.API_KEY,
-                    'Content-Type': 'application/json'
-                }
+            await client.start({
+                // Estes inputs são para o primeiro login. Se TELEGRAM_SESSION estiver preenchido e válido, não aparecerão.
+                // Se o seu bot travar aqui no Render, é porque a stringSession não está válida e ele está esperando input.
+                phoneNumber: async () => { console.log("⚠️ AVISO: Requisição de número de telefone. Certifique-se que TELEGRAM_SESSION está configurado com uma string de sessão válida no Render."); return await input.text('Digite seu número com DDI (ex: +5511987654321): '); },
+                password: async () => { console.log("⚠️ AVISO: Requisição de senha 2FA. Certifique-se que TELEGRAM_SESSION está configurado."); return await input.text('Senha 2FA (se tiver): '); },
+                phoneCode: async () => { console.log("⚠️ AVISO: Requisição de código do Telegram. Certifique-se que TELEGRAM_SESSION está configurado."); return await input.text('Código do Telegram: '); },
+                onError: (err) => console.log('Erro durante o login/start do cliente:', err),
             });
-
-            console.log('📬 Resposta da UTMify:', res.status, res.data);
-            console.log('📦 Pedido criado na UTMify:', res.data);
-
-            salvarVenda({
-                chave,
-                hash,
-                valor: valorLiquidoNum,
-                utm_source: utmsEncontradas.utm_source,
-                utm_medium: utmsEncontradas.utm_medium,
-                utm_campaign: utmsEncontradas.utm_campaign,
-                utm_content: utmsEncontradas.utm_content,
-                utm_term: utmsEncontradas.utm_term,
-                orderId,
-                transaction_id,
-                ip: ipClienteFrontend,
-                userAgent: 'userbot'
-            });
-
-        } catch (err) {
-            console.error('❌ Erro ao processar mensagem ou enviar para UTMify:', err.message);
-            if (err.response) {
-                console.error('🛑 Código de status da UTMify:', err.response.status);
-                console.error('📩 Resposta de erro da UTMify:', err.response.data);
-            }
+            console.log('✅ Userbot conectado!');
+            // **IMPORTANTE:** Se for o primeiro login no Render e ele te der uma nova string de sessão, COPIE-A E COLOQUE NAS VARIÁVEIS DE AMBIENTE DO RENDER para evitar novos logins interativos.
+            // console.log('🔑 Nova StringSession para .env (após o primeiro login):', client.session.save());
+        } catch (error) {
+            console.error('❌ Falha ao iniciar o userbot:', error.message);
+            process.exit(1);
         }
 
-    }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
+        // --- MANIPULAÇÃO DE MENSAGENS ---
+        client.addEventHandler(async (event) => {
+            const message = event.message;
+            if (!message) return;
 
-    // --- MARACUTAIA PARA MANTER O SERVIÇO ATIVO (PING INTERNO) ---
-    const PING_INTERVAL_MS = 30 * 1000;
-    const SELF_PING_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+            const chat = await message.getChat();
+            const incomingChatId = chat.id;
 
-    function sendSelfPing() {
-        console.log(`Pinging myself at ${SELF_PING_URL} to stay awake...`);
-        fetch(SELF_PING_URL)
-            .then(res => {
-                if (res.ok) {
-                    console.log('Self-ping successful. Service should remain active.');
-                } else {
-                    console.warn(`Self-ping failed with status: ${res.status}.`);
+            let normalizedIncomingChatId = incomingChatId;
+            if (typeof incomingChatId === 'bigint') {
+                if (incomingChatId < 0 && incomingChatId.toString().startsWith('-100')) {
+                    normalizedIncomingChatId = BigInt(incomingChatId.toString().substring(4));
+                } else if (incomingChatId < 0) {
+                    normalizedIncomingChatId = BigInt(incomingChatId * BigInt(-1));
                 }
-            })
-            .catch(error => {
-                console.error('Error during self-ping:', error.message);
-            });
-    }
+            } else {
+                normalizedIncomingChatId = BigInt(Math.abs(Number(incomingChatId)));
+            }
 
-    setInterval(sendSelfPing, PING_INTERVAL_MS);
-    console.log(`Self-ping programado para cada ${PING_INTERVAL_MS / 1000} segundos.`);
-    // --- FIM DA MARACUTAIA ---
+            let normalizedConfiguredChatId = CHAT_ID;
+            if (typeof CHAT_ID === 'bigint') {
+                if (CHAT_ID < 0 && CHAT_ID.toString().startsWith('-100')) {
+                    normalizedConfiguredChatId = BigInt(CHAT_ID.toString().substring(4));
+                } else if (CHAT_ID < 0) {
+                    normalizedConfiguredChatId = BigInt(CHAT_ID * BigInt(-1));
+                }
+            } else {
+                normalizedConfiguredChatId = BigInt(Math.abs(Number(CHAT_ID)));
+            }
 
-    app.listen(PORT, () => {
-        console.log(`🌐 Servidor HTTP Express escutando na porta ${PORT}.`);
-        console.log('Este servidor ajuda a manter o bot ativo em plataformas de hospedagem e recebe dados do frontend.');
-    });
+            if (normalizedIncomingChatId !== normalizedConfiguredChatId) {
+                return;
+            }
 
-})(); // Fechamento do IIFE
+            let texto = (message.message || '').replace(/\r/g, '').trim();
+
+            const idRegex = /ID\s+Transa(?:ç|c)[aã]o\s+Gateway[:：]?\s*([\w-]{10,})/i;
+            const valorLiquidoRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
+            const nomeCompletoRegex = /Nome\s+Completo[:：]?\s*(.+)/i;
+            const emailRegex = /E-mail[:：]?\s*(\S+@\S+\.\S+)/i;
+            const metodoPagamentoRegex = /M[ée]todo\s+Pagamento[:：]?\s*(.+)/i;
+            const plataformaPagamentoRegex = /Plataforma\s+Pagamento[:：]?\s*(.+)/i;
+
+
+            const idMatch = texto.match(idRegex);
+            const valorLiquidoMatch = texto.match(valorLiquidoRegex);
+
+            const telegramMessageTimestamp = message.date * 1000;
+
+            const nomeMatch = texto.match(nomeCompletoRegex);
+            const emailMatch = texto.match(emailRegex);
+            const metodoPagamentoMatch = texto.match(metodoPagamentoRegex);
+            const plataformaPagamentoMatch = texto.match(plataformaPagamentoRegex);
+
+            const customerName = nomeMatch ? nomeMatch[1].trim() : "Cliente Desconhecido";
+            const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
+            const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
+            const platform = plataformaPagamentoMatch ? plataformaPagamentoMatch[1].trim() : 'UnknownPlatform';
+            const status = 'paid';
+
+            if (!idMatch || !valorLiquidoMatch) {
+                console.log('⚠️ Mensagem sem dados completos de venda (ID da Transação Gateway ou Valor Líquido não encontrados).');
+                return;
+            }
+
+            try {
+                const transaction_id = idMatch[1].trim();
+                const valorLiquidoNum = parseFloat(valorLiquidoMatch[1].replace(/\./g, '').replace(',', '.').trim());
+
+                if (isNaN(valorLiquidoNum) || valorLiquidoNum <= 0) {
+                    console.log('⚠️ Valor Líquido numérico inválido ou menor/igual a zero:', valorLiquidoMatch[1]);
+                    return;
+                }
+
+                const chave = gerarChaveUnica({ transaction_id });
+                const hash = gerarHash({ transaction_id });
+
+                const jaExiste = await vendaExiste(hash);
+                if (jaExiste) {
+                    console.log(`🔁 Venda com hash ${hash} já registrada. Ignorando duplicata.`);
+                    return;
+                }
+
+                let utmsEncontradas = {
+                    utm_source: null,
+                    utm_medium: null,
+                    utm_campaign: null,
+                    utm_content: null,
+                    utm_term: null
+                };
+                let ipClienteFrontend = 'telegram';
+
+                // --- BUSCA POR UTMs NO BANCO DE DADOS (BASEADO EM TEMPO/IP) ---
+                const matchedFrontendUtms = await buscarUtmsPorTempoEValor(
+                    telegramMessageTimestamp,
+                    null
+                );
+
+                if (matchedFrontendUtms) {
+                    utmsEncontradas.utm_source = matchedFrontendUtms.utm_source;
+                    utmsEncontradas.utm_medium = matchedFrontendUtms.utm_medium;
+                    utmsEncontradas.utm_campaign = matchedFrontendUtms.utm_campaign;
+                    utmsEncontradas.utm_content = matchedFrontendUtms.utm_content;
+                    utmsEncontradas.utm_term = matchedFrontendUtms.utm_term;
+                    ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
+                    console.log(`✅ UTMs encontradas via correspondência por tempo para ${transaction_id}.`);
+                } else {
+                    console.log(`⚠️ Nenhuma UTM correspondente encontrada por tempo para ${transaction_id}. Enviando sem UTMs de atribuição.`);
+                }
+                // --- FIM DA BUSCA POR UTMs ---
+
+                const orderId = transaction_id;
+                const agoraUtc = moment.utc().format('YYYY-MM-DD HH:mm:ss');
+
+                const payload = {
+                    orderId: orderId,
+                    platform: platform,
+                    paymentMethod: paymentMethod,
+                    status: status,
+                    createdAt: agoraUtc,
+                    approvedDate: agoraUtc,
+                    refundedAt: null,
+                    customer: {
+                        name: customerName,
+                        email: customerEmail,
+                        phone: null,
+                        document: null,
+                        country: 'BR',
+                        ip: ipClienteFrontend,
+                    },
+                    products: [
+                        {
+                            id: 'acesso-vip-bundle',
+                            name: 'Acesso VIP',
+                            planId: null,
+                            planName: null,
+                            quantity: 1,
+                            priceInCents: Math.round(valorLiquidoNum * 100)
+                        }
+                    ],
+                    trackingParameters: utmsEncontradas,
+                    commission: {
+                        totalPriceInCents: Math.round(valorLiquidoNum * 100),
+                        gatewayFeeInCents: 0,
+                        userCommissionInCents: Math.round(valorLiquidoNum * 100),
+                        currency: 'BRL'
+                    },
+                    isTest: false
+                };
+
+                for (const key in payload.trackingParameters) {
+                    if (payload.trackingParameters[key] === null || payload.trackingParameters[key] === '') {
+                        payload.trackingParameters[key] = null;
+                    }
+                }
+
+                const res = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
+                    headers: {
+                        'x-api-token': process.env.API_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                console.log('📬 Resposta da UTMify:', res.status, res.data);
+                console.log('📦 Pedido criado na UTMify:', res.data);
+
+                salvarVenda({
+                    chave,
+                    hash,
+                    valor: valorLiquidoNum,
+                    utm_source: utmsEncontradas.utm_source,
+                    utm_medium: utmsEncontradas.utm_medium,
+                    utm_campaign: utmsEncontradas.utm_campaign,
+                    utm_content: utmsEncontradas.utm_content,
+                    utm_term: utmsEncontradas.utm_term,
+                    orderId,
+                    transaction_id,
+                    ip: ipClienteFrontend,
+                    userAgent: 'userbot'
+                });
+
+            } catch (err) {
+                console.error('❌ Erro ao processar mensagem ou enviar para UTMify:', err.message);
+                if (err.response) {
+                    console.error('🛑 Código de status da UTMify:', err.response.status);
+                    console.error('📩 Resposta de erro da UTMify:', err.response.data);
+                }
+            }
+
+        }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
+
+        // --- MARACUTAIA PARA MANTER O SERVIÇO ATIVO (PING INTERNO) ---
+        const PING_INTERVAL_MS = 30 * 1000;
+        const SELF_PING_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
+        function sendSelfPing() {
+            console.log(`Pinging myself at ${SELF_PING_URL} to stay awake...`);
+            fetch(SELF_PING_URL)
+                .then(res => {
+                    if (res.ok) {
+                        console.log('Self-ping successful. Service should remain active.');
+                    } else {
+                        console.warn(`Self-ping failed with status: ${res.status}.`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error during self-ping:', error.message);
+                });
+        }
+
+        setInterval(sendSelfPing, PING_INTERVAL_MS);
+        console.log(`Self-ping programado para cada ${PING_INTERVAL_MS / 1000} segundos.`);
+        // --- FIM DA MARACUTAIA ---
+
+    })(); // Fechamento do IIFE que contém a lógica do bot e DB
+}); // Fechamento do app.listen (agora o IIFE está DENTRO dele)
