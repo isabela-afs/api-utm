@@ -13,7 +13,7 @@ app.use(express.json());
 
 const apiId = 23313993;
 const apiHash = 'd9249aed345807c04562fb52448a878c';
-const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNTQBu6qxH7L+IAAXrxfRYuvnMRA7NGFTrCkFlwRvZD8Y2TtQASU5t5zWxTUmUYiwrYDfucDe/dzN94xiAAmLNia9JvC/RKsPGEuqSuvp79NjxcmxalVlduiRw31nhu62VV5owrD9njDIGgjTA4zdYE7gMzwI7KGLLQj2x31xuJNhtuCku+35Ij5fkYOaufKe56Of8l/QPmzLtHOHc5TAfql3ofpTMhhx8K2Ju6U33rAeXL6sz/WrPrhRlEe7gYBCON5rQtSyn6bneXNXnMCh5yhVqPHw8HVzM2iY2vH5TRXqcgHFvBcxmBDtHNZyGEQsxh352s+BWRUo8ho03+zn0FOSFiQ=');
+const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu2jf4IeBDIbqdgZ3FrFITVMmVB9JUY/NaE/LD8WxiJHeySIdTYbekcnwlN/O0k7N6ck0ukQEw4gp7uB+ayqHnBphnxfq5WEYea3ekOSrTXNzypIoIUUbY52+v0BxPVtN1sqehFxVB13ueoogMkaTlvkDxa4RFEkaoiMv2KR1miH0FFf1IrkhnNMqehNHJJno9a1gIE9WiV0y/JSg73n1rBZ9waqd/eP+QJ/rD5OxJYaaZKq/OowkQmywYva1J8xVJHVqmlpbJEnQPgqsCZanS0BzuVOmYKhsOyjWAm5UPD9uesdjonFxx+tdzRC2fYBYaoByF6/u9ye7PvKsF6v7Ixk=');
 const CHAT_ID = BigInt(-1002733614113);
 
 const PORT = process.env.PORT || 3000;
