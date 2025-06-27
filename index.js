@@ -404,7 +404,10 @@ app.listen(PORT, () => {
                 return;
             }
 
-            let texto = (message.message || '').replace(/\r/g, '').trim();
+            let texto = ''; // Inicializa como string vazia
+            if (message.message != null) { // Verifica se message.message existe e não é null/undefined
+                texto = String(message.message).replace(/\r/g, '').trim();
+            }
 
             if (texto.startsWith('/start ')) {
                 const startPayload = decodeURIComponent(texto.substring('/start '.length).trim());
@@ -436,7 +439,7 @@ app.listen(PORT, () => {
             const customerName = nomeMatch ? nomeMatch[1].trim() : "Cliente Desconhecido";
             const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
             const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
-            const platform = plataformaPagamentoRegex ? plataformaPagamentoRegex[1].trim() : 'UnknownPlatform';
+            const platform = plataformaPagamentoMatch ? plataformaPagamentoMatch[1].trim() : 'UnknownPlatform';
             const status = 'paid';
 
             if (!idMatch || !valorLiquidoMatch) {
@@ -472,7 +475,7 @@ app.listen(PORT, () => {
                 let ipClienteFrontend = 'telegram';
                 let matchedFrontendUtms = null;
 
-                // NOVA LÓGICA DE BUSCA: Prioriza APENAS o Código de Venda da mensagem
+                // LÓGICA DE BUSCA ÚNICA: Prioriza APENAS o Código de Venda da mensagem
                 const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
                 
                 if (extractedCodigoDeVenda) {
