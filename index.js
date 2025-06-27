@@ -11,12 +11,16 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 
-const apiId = 23313993;
-const apiHash = 'd9249aed345807c04562fb52448a878c';
-const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu2jf4IeBDIbqdgZ3FrFITVMmVB9JUY/NaE/LD8WxiJHeySIdTYbekcnwlN/O0k7N6ck0ukQEw4gp7uB+ayqHnBphnxfq5WEYea3ekOSrTXNzypIoIUUbY52+v0BxPVtN1sqehFxVB13ueoogMkaTlvkDxa4RFEkaoiMv2KR1miH0FFf1IrkhnNMqehNHJJno9a1gIE9WiV0y/JSg73n1rBZ9waqd/eP+QJ/rD5OxJYaaZKq/OowkQmywYva1J8xVJHVqmlpbJEnQPgqsCZanS0BzuVOmYKhsOyjWAm5UPD9uesdjonFxx+tdzRC2fYBYaoByF6/u9ye7PvKsF6v7Ixk=');
-const CHAT_ID = BigInt(-1002733614113);
+const apiId = 23313993; 
+const apiHash = 'd9249aed345807c04562fb52448a878c'; 
+const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu2GwozhcqLzaslIxvjgKuyk0SDJOEFBzd2qqrR428YPK3C/yA0s3sj/yqOkDNiiG3KXnmrXlVg/ro/XUM5PzR8bIQjLpVfMWxAbmqhJhsoIG7d0J58nIEnPqVDtc51L45kUMJhap/TdsVIuFaF2c2v5ZsHB/rAJGHY3mkbWR2l+3ovwnK4CCe4vfOt1uY7rK26drUUa4cWPANgREig7ODg6xbVo/7nnaiGwNLLyRF2qom47FSY6om+knu6ZTUE94romAPhp4cIwe2KP0Qdci4eWLHKdxf/lvY82epq5BHxFauPty7LoyLVemGbRHRGx2d2OAHrbxqFQcnZw/WephQ1g=');
+const CHAT_ID = BigInt(-1002733614113); 
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; 
+
+// Mapa temporário para associar user_id do Telegram ao fbclid
+// NOTA: Para produção, isso deveria ser persistido em banco de dados!
+const userFbclidMap = new Map();
 
 // --- CONFIGURAÇÃO DO BANCO DE DADOS POSTGRESQL ---
 const pool = new Pool({
@@ -63,7 +67,8 @@ async function setupDatabase() {
             CREATE TABLE IF NOT EXISTS frontend_utms (
                 id SERIAL PRIMARY KEY,
                 timestamp_ms BIGINT NOT NULL,
-                valor REAL NOT NULL,
+                valor REAL, 
+                fbclid TEXT, 
                 utm_source TEXT,
                 utm_medium TEXT,
                 utm_campaign TEXT,
@@ -146,15 +151,16 @@ async function salvarFrontendUtms(data) {
     console.log('💾 Tentando salvar UTMs do frontend no banco (PostgreSQL)...');
     const sql = `
         INSERT INTO frontend_utms (
-            timestamp_ms, valor, utm_source, utm_medium,
+            timestamp_ms, valor, fbclid, utm_source, utm_medium,
             utm_campaign, utm_content, utm_term, ip
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
     `;
 
     const valores = [
         data.timestamp,
         data.valor,
+        data.fbclid || null,
         data.utm_source || null,
         data.utm_medium || null,
         data.utm_campaign || null,
@@ -171,8 +177,26 @@ async function salvarFrontendUtms(data) {
     }
 }
 
+async function buscarUtmsPorFbclid(fbclid) {
+    console.log(`🔎 Buscando UTMs do frontend por fbclid: ${fbclid}...`);
+    const sql = 'SELECT * FROM frontend_utms WHERE fbclid = $1 ORDER BY received_at DESC LIMIT 1';
+    try {
+        const res = await pool.query(sql, [fbclid]);
+        if (res.rows.length > 0) {
+            console.log(`✅ UTMs encontradas para fbclid ${fbclid}.`);
+            return res.rows[0];
+        } else {
+            console.log(`🔎 Nenhuma UTM do frontend encontrada para fbclid ${fbclid}.`);
+            return null;
+        }
+    } catch (err) {
+        console.error('❌ Erro ao buscar UTMs por fbclid (PostgreSQL):', err.message);
+        return null;
+    }
+}
+
 async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, windowMs = 120000) {
-    console.log(`🔎 Buscando UTMs do frontend para timestamp ${targetTimestamp} (janela de ${windowMs / 1000}s)...`);
+    console.log(`🔎 Buscando UTMs do frontend por timestamp ${targetTimestamp} (janela de ${windowMs / 1000}s)...`);
     const minTimestamp = targetTimestamp - windowMs;
     const maxTimestamp = targetTimestamp + windowMs;
 
@@ -223,15 +247,20 @@ async function limparFrontendUtmsAntigos() {
 
 // --- ENDPOINT HTTP PARA RECEBER UTMs DO FRONTEND ---
 app.post('/frontend-utm-data', (req, res) => {
-    const { timestamp, valor, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip } = req.body;
+    const { timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip } = req.body;
 
-    if (!timestamp || !valor) {
+    console.log('🚀 [BACKEND] Dados do frontend recebidos:', {
+        timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip
+    });
+
+    if (!timestamp || valor === undefined || valor === null) {
         return res.status(400).send('Timestamp e Valor são obrigatórios.');
     }
 
     salvarFrontendUtms({
         timestamp,
         valor,
+        fbclid,
         utm_source,
         utm_medium,
         utm_campaign,
@@ -243,11 +272,33 @@ app.post('/frontend-utm-data', (req, res) => {
     res.status(200).send('Dados recebidos com sucesso!');
 });
 
+// --- NOVO: Endpoint para ping (manter o serviço ativo) ---
+app.get('/ping', (req, res) => {
+    console.log('💚 [PING] Recebida requisição /ping. Serviço está ativo.');
+    res.status(200).send('Pong!');
+});
+
 
 // --- INICIALIZA O SERVIDOR HTTP PRIMEIRO ---
 app.listen(PORT, () => {
     console.log(`🌐 Servidor HTTP Express escutando na porta ${PORT}.`);
     console.log('Este servidor ajuda a manter o bot ativo em plataformas de hospedagem e recebe dados do frontend.');
+
+    // Configura o auto-ping
+    const pingInterval = 20 * 1000; // 20 segundos
+    setInterval(() => {
+        // Use a URL interna do servidor para o auto-ping
+        // Para Render.com, é mais eficaz um serviço externo pingando a URL pública.
+        axios.get(`http://localhost:${PORT}/ping`)
+            .then(response => {
+                // console.log(`💚 Auto-ping bem-sucedido: ${response.status}`); // Descomentar para ver pings no log
+            })
+            .catch(error => {
+                console.error(`💔 Erro no auto-ping: ${error.message}`);
+            });
+    }, pingInterval);
+    console.log(`⚡ Auto-ping configurado para cada ${pingInterval / 1000} segundos.`);
+
 
     // --- APÓS O SERVIDOR HTTP ESTAR ESCUTANDO, INICIA AS TAREFAS ASSÍNCRONAS ---
     (async () => {
@@ -278,7 +329,6 @@ app.listen(PORT, () => {
                 onError: (err) => console.log('Erro durante o login/start do cliente:', err),
             });
             console.log('✅ Userbot conectado!');
-            // DESCOMENTE A PRÓXIMA LINHA PARA PEGAR A NOVA STRING DE SESSÃO APÓS O LOGIN
             console.log('🔑 Nova StringSession para .env (após o primeiro login):', client.session.save());
         } catch (error) {
             console.error('❌ Falha ao iniciar o userbot:', error.message);
@@ -321,8 +371,16 @@ app.listen(PORT, () => {
 
             let texto = (message.message || '').replace(/\r/g, '').trim();
 
+            if (texto.startsWith('/start ')) {
+                const startPayload = decodeURIComponent(texto.substring('/start '.length).trim());
+                userFbclidMap.set(message.senderId.toString(), startPayload); 
+                console.log(`🤖 [BOT] User ${message.senderId} iniciado com payload: ${startPayload}`);
+                return;
+            }
+
             const idRegex = /ID\s+Transa(?:ç|c)[aã]o\s+Gateway[:：]?\s*([\w-]{10,})/i;
             const valorLiquidoRegex = /Valor\s+L[ií]quido[:：]?\s*R?\$?\s*([\d.,]+)/i;
+            const codigoDeVendaRegex = /Código\s+de\s+Venda[:：]?\s*(.+)/i;
             const nomeCompletoRegex = /Nome\s+Completo[:：]?\s*(.+)/i;
             const emailRegex = /E-mail[:：]?\s*(\S+@\S+\.\S+)/i;
             const metodoPagamentoRegex = /M[ée]todo\s+Pagamento[:：]?\s*(.+)/i;
@@ -331,6 +389,7 @@ app.listen(PORT, () => {
 
             const idMatch = texto.match(idRegex);
             const valorLiquidoMatch = texto.match(valorLiquidoRegex);
+            const codigoDeVendaMatch = texto.match(codigoDeVendaRegex);
 
             const telegramMessageTimestamp = message.date * 1000;
 
@@ -376,11 +435,25 @@ app.listen(PORT, () => {
                     utm_term: null
                 };
                 let ipClienteFrontend = 'telegram';
+                let matchedFrontendUtms = null;
 
-                const matchedFrontendUtms = await buscarUtmsPorTempoEValor(
-                    telegramMessageTimestamp,
-                    null
-                );
+                const userAssociatedFbclid = userFbclidMap.get(message.senderId.toString());
+                if (userAssociatedFbclid && userAssociatedFbclid !== 'no_fbclid') {
+                    console.log(`🤖 [BOT] Tentando encontrar UTMs por fbclid associado ao user_id: ${userAssociatedFbclid}`);
+                    matchedFrontendUtms = await buscarUtmsPorFbclid(userAssociatedFbclid);
+                } else if (codigoDeVendaMatch) {
+                    const extractedCodigoDeVenda = codigoDeVendaMatch[1].trim();
+                    console.log(`🤖 [BOT] Tentando encontrar UTMs por Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
+                    matchedFrontendUtms = await buscarUtmsPorFbclid(extractedCodigoDeVenda);
+                }
+                
+                if (!matchedFrontendUtms) {
+                    console.log(`🤖 [BOT] Fallback: Nenhuma UTM encontrada por fbclid/código de venda. Tentando correspondência por tempo para ${transaction_id}.`);
+                    matchedFrontendUtms = await buscarUtmsPorTempoEValor(
+                        telegramMessageTimestamp,
+                        null
+                    );
+                }
 
                 if (matchedFrontendUtms) {
                     utmsEncontradas.utm_source = matchedFrontendUtms.utm_source;
@@ -389,9 +462,9 @@ app.listen(PORT, () => {
                     utmsEncontradas.utm_content = matchedFrontendUtms.utm_content;
                     utmsEncontradas.utm_term = matchedFrontendUtms.utm_term;
                     ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
-                    console.log(`✅ UTMs encontradas via correspondência por tempo para ${transaction_id}.`);
+                    console.log(`✅ [BOT] UTMs para ${transaction_id} atribuídas!`);
                 } else {
-                    console.log(`⚠️ Nenhuma UTM correspondente encontrada por tempo para ${transaction_id}. Enviando sem UTMs de atribuição.`);
+                    console.log(`⚠️ [BOT] Nenhuma UTM correspondente encontrada para ${transaction_id}. Enviando para UTMify sem UTMs de atribuição.`);
                 }
 
                 const orderId = transaction_id;
@@ -404,7 +477,6 @@ app.listen(PORT, () => {
                     status: status,
                     createdAt: agoraUtc,
                     approvedDate: agoraUtc,
-                    refundedAt: null,
                     customer: {
                         name: customerName,
                         email: customerEmail,
@@ -434,7 +506,7 @@ app.listen(PORT, () => {
                 };
 
                 for (const key in payload.trackingParameters) {
-                    if (payload.trackingParameters[key] === null || payload.trackingParameters[key] === '') {
+                    if (payload.trackingParameters[key] === '') {
                         payload.trackingParameters[key] = null;
                     }
                 }
@@ -446,8 +518,8 @@ app.listen(PORT, () => {
                     }
                 });
 
-                console.log('📬 Resposta da UTMify:', res.status, res.data);
-                console.log('📦 Pedido criado na UTMify:', res.data);
+                console.log('📬 [BOT] Resposta da UTMify:', res.status, res.data);
+                console.log('📦 [BOT] Pedido criado na UTMify:', res.data);
 
                 salvarVenda({
                     chave,
@@ -465,13 +537,13 @@ app.listen(PORT, () => {
                 });
 
             } catch (err) {
-                console.error('❌ Erro ao processar mensagem ou enviar para UTMify:', err.message);
+                console.error('❌ [BOT] Erro ao processar mensagem ou enviar para UTMify:', err.message);
                 if (err.response) {
-                    console.error('🛑 Código de status da UTMify:', err.response.status);
-                    console.error('📩 Resposta de erro da UTMify:', err.response.data);
+                    console.error('🛑 [BOT] Código de status da UTMify:', err.response.status);
+                    console.error('📩 [BOT] Resposta de erro da UTMify:', err.response.data);
                 }
             }
 
         }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
-    })(); // Fechamento do IIFE
-}); // Fechamento do app.listen
+    })();
+});
