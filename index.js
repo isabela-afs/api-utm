@@ -18,10 +18,6 @@ const CHAT_ID = BigInt(-1002733614113);
 
 const PORT = process.env.PORT || 3000; 
 
-// Mapa temporário para associar user_id do Telegram ao fbclid
-// NOTA: Para produção, isso deveria ser persistido em banco de dados!
-const userFbclidMap = new Map();
-
 // --- CONFIGURAÇÃO DO BANCO DE DADOS POSTGRESQL ---
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -66,6 +62,7 @@ async function setupDatabase() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS frontend_utms (
                 id SERIAL PRIMARY KEY,
+                unique_click_id TEXT UNIQUE NOT NULL, 
                 timestamp_ms BIGINT NOT NULL,
                 valor REAL, 
                 fbclid TEXT, 
@@ -78,7 +75,18 @@ async function setupDatabase() {
                 received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log('✅ Tabela "frontend_utms" verificada/criada no PostgreSQL.');
+        console.log('✅ Tabela "frontend_utms" verificada/criada/atualizada no PostgreSQL.');
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS telegram_users (
+                telegram_user_id TEXT PRIMARY KEY,
+                unique_click_id TEXT, 
+                last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Tabela "telegram_users" verificada/criada no PostgreSQL.');
+
         client.release();
     } catch (err) {
         console.error('❌ Erro ao configurar tabelas no PostgreSQL:', err.message);
@@ -86,7 +94,7 @@ async function setupDatabase() {
     }
 }
 
-// --- FUNÇÕES DE UTILIDADE PARA O BANCO DE DADOS (AGORA COM PG) ---
+// --- FUNÇÕES DE UTILIDADE PARA O BANCO DE DADOS ---
 
 function gerarChaveUnica({ transaction_id }) {
     return `chave-${transaction_id}`;
@@ -147,20 +155,48 @@ async function vendaExiste(hash) {
     }
 }
 
+async function saveUserClickAssociation(telegramUserId, uniqueClickId) {
+    try {
+        await pool.query(
+            `INSERT INTO telegram_users (telegram_user_id, unique_click_id, last_activity)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (telegram_user_id) DO UPDATE SET unique_click_id = EXCLUDED.unique_click_id, last_activity = NOW();`,
+            [telegramUserId, uniqueClickId]
+        );
+        console.log(`✅ Associação user_id(${telegramUserId}) -> click_id(${uniqueClickId}) salva no DB.`);
+    } catch (err) {
+        console.error('❌ Erro ao salvar associação user_id-click_id no DB:', err.message);
+    }
+}
+
+async function getUniqueClickIdForUser(telegramUserId) {
+    try {
+        const res = await pool.query(
+            `SELECT unique_click_id FROM telegram_users WHERE telegram_user_id = $1 LIMIT 1;`,
+            [telegramUserId]
+        );
+        return res.rows.length > 0 ? res.rows[0].unique_click_id : null;
+    } catch (err) {
+        console.error('❌ Erro ao buscar unique_click_id para o user_id:', err.message);
+        return null;
+    }
+}
+
 async function salvarFrontendUtms(data) {
     console.log('💾 Tentando salvar UTMs do frontend no banco (PostgreSQL)...');
     const sql = `
         INSERT INTO frontend_utms (
-            timestamp_ms, valor, fbclid, utm_source, utm_medium,
+            unique_click_id, timestamp_ms, valor, fbclid, utm_source, utm_medium,
             utm_campaign, utm_content, utm_term, ip
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
     `;
 
     const valores = [
+        data.unique_click_id,
         data.timestamp,
         data.valor,
-        data.fbclid || null,
+        data.fbclid || null, 
         data.utm_source || null,
         data.utm_medium || null,
         data.utm_campaign || null,
@@ -177,20 +213,20 @@ async function salvarFrontendUtms(data) {
     }
 }
 
-async function buscarUtmsPorFbclid(fbclid) {
-    console.log(`🔎 Buscando UTMs do frontend por fbclid: ${fbclid}...`);
-    const sql = 'SELECT * FROM frontend_utms WHERE fbclid = $1 ORDER BY received_at DESC LIMIT 1';
+async function buscarUtmsPorUniqueClickId(uniqueClickId) {
+    console.log(`🔎 Buscando UTMs do frontend por unique_click_id: ${uniqueClickId}...`);
+    const sql = 'SELECT * FROM frontend_utms WHERE unique_click_id = $1 ORDER BY received_at DESC LIMIT 1';
     try {
-        const res = await pool.query(sql, [fbclid]);
+        const res = await pool.query(sql, [uniqueClickId]);
         if (res.rows.length > 0) {
-            console.log(`✅ UTMs encontradas para fbclid ${fbclid}.`);
+            console.log(`✅ UTMs encontradas para unique_click_id ${uniqueClickId}.`);
             return res.rows[0];
         } else {
-            console.log(`🔎 Nenhuma UTM do frontend encontrada para fbclid ${fbclid}.`);
+            console.log(`🔎 Nenhuma UTM do frontend encontrada para unique_click_id ${uniqueClickId}.`);
             return null;
         }
     } catch (err) {
-        console.error('❌ Erro ao buscar UTMs por fbclid (PostgreSQL):', err.message);
+        console.error('❌ Erro ao buscar UTMs por unique_click_id (PostgreSQL):', err.message);
         return null;
     }
 }
@@ -247,17 +283,18 @@ async function limparFrontendUtmsAntigos() {
 
 // --- ENDPOINT HTTP PARA RECEBER UTMs DO FRONTEND ---
 app.post('/frontend-utm-data', (req, res) => {
-    const { timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip } = req.body;
+    const { unique_click_id, timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip } = req.body;
 
     console.log('🚀 [BACKEND] Dados do frontend recebidos:', {
-        timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip
+        unique_click_id, timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip
     });
 
-    if (!timestamp || valor === undefined || valor === null) {
-        return res.status(400).send('Timestamp e Valor são obrigatórios.');
+    if (!unique_click_id || !timestamp || valor === undefined || valor === null) {
+        return res.status(400).send('unique_click_id, Timestamp e Valor são obrigatórios.');
     }
 
     salvarFrontendUtms({
+        unique_click_id,
         timestamp,
         valor,
         fbclid,
@@ -272,7 +309,7 @@ app.post('/frontend-utm-data', (req, res) => {
     res.status(200).send('Dados recebidos com sucesso!');
 });
 
-// --- NOVO: Endpoint para ping (manter o serviço ativo) ---
+// --- Endpoint para ping (manter o serviço ativo) ---
 app.get('/ping', (req, res) => {
     console.log('💚 [PING] Recebida requisição /ping. Serviço está ativo.');
     res.status(200).send('Pong!');
@@ -287,11 +324,9 @@ app.listen(PORT, () => {
     // Configura o auto-ping
     const pingInterval = 20 * 1000; // 20 segundos
     setInterval(() => {
-        // Use a URL interna do servidor para o auto-ping
-        // Para Render.com, é mais eficaz um serviço externo pingando a URL pública.
         axios.get(`http://localhost:${PORT}/ping`)
             .then(response => {
-                // console.log(`💚 Auto-ping bem-sucedido: ${response.status}`); // Descomentar para ver pings no log
+                // console.log(`💚 Auto-ping bem-sucedido: ${response.status}`);
             })
             .catch(error => {
                 console.error(`💔 Erro no auto-ping: ${error.message}`);
@@ -373,8 +408,8 @@ app.listen(PORT, () => {
 
             if (texto.startsWith('/start ')) {
                 const startPayload = decodeURIComponent(texto.substring('/start '.length).trim());
-                userFbclidMap.set(message.senderId.toString(), startPayload); 
-                console.log(`🤖 [BOT] User ${message.senderId} iniciado com payload: ${startPayload}`);
+                await saveUserClickAssociation(message.senderId.toString(), startPayload);
+                console.log(`🤖 [BOT] User ${message.senderId} iniciado com unique_click_id: ${startPayload}`);
                 return;
             }
 
@@ -401,7 +436,7 @@ app.listen(PORT, () => {
             const customerName = nomeMatch ? nomeMatch[1].trim() : "Cliente Desconhecido";
             const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
             const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
-            const platform = plataformaPagamentoMatch ? plataformaPagamentoMatch[1].trim() : 'UnknownPlatform';
+            const platform = plataformaPagamentoRegex ? plataformaPagamentoRegex[1].trim() : 'UnknownPlatform';
             const status = 'paid';
 
             if (!idMatch || !valorLiquidoMatch) {
@@ -437,23 +472,18 @@ app.listen(PORT, () => {
                 let ipClienteFrontend = 'telegram';
                 let matchedFrontendUtms = null;
 
-                const userAssociatedFbclid = userFbclidMap.get(message.senderId.toString());
-                if (userAssociatedFbclid && userAssociatedFbclid !== 'no_fbclid') {
-                    console.log(`🤖 [BOT] Tentando encontrar UTMs por fbclid associado ao user_id: ${userAssociatedFbclid}`);
-                    matchedFrontendUtms = await buscarUtmsPorFbclid(userAssociatedFbclid);
-                } else if (codigoDeVendaMatch) {
-                    const extractedCodigoDeVenda = codigoDeVendaMatch[1].trim();
-                    console.log(`🤖 [BOT] Tentando encontrar UTMs por Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
-                    matchedFrontendUtms = await buscarUtmsPorFbclid(extractedCodigoDeVenda);
+                // NOVA LÓGICA DE BUSCA: Prioriza APENAS o Código de Venda da mensagem
+                const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
+                
+                if (extractedCodigoDeVenda) {
+                    console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
+                    matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
+                } else {
+                    console.log(`⚠️ [BOT] Código de Venda não encontrado na mensagem. Nenhuma UTM correspondente será buscada.`);
                 }
                 
-                if (!matchedFrontendUtms) {
-                    console.log(`🤖 [BOT] Fallback: Nenhuma UTM encontrada por fbclid/código de venda. Tentando correspondência por tempo para ${transaction_id}.`);
-                    matchedFrontendUtms = await buscarUtmsPorTempoEValor(
-                        telegramMessageTimestamp,
-                        null
-                    );
-                }
+                // Os fallbacks anteriores por user_id e timestamp/IP foram REMOVIDOS,
+                // pois a busca agora é estritamente pelo Código de Venda.
 
                 if (matchedFrontendUtms) {
                     utmsEncontradas.utm_source = matchedFrontendUtms.utm_source;
@@ -464,7 +494,7 @@ app.listen(PORT, () => {
                     ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
                     console.log(`✅ [BOT] UTMs para ${transaction_id} atribuídas!`);
                 } else {
-                    console.log(`⚠️ [BOT] Nenhuma UTM correspondente encontrada para ${transaction_id}. Enviando para UTMify sem UTMs de atribuição.`);
+                    console.log(`⚠️ [BOT] Nenhuma UTM correspondente encontrada para ${transaction_id} usando o Código de Venda. Enviando para UTMify sem UTMs de atribuição.`);
                 }
 
                 const orderId = transaction_id;
