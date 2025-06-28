@@ -7,8 +7,19 @@ const axios = require('axios');
 const express = require('express');
 const { Pool } = require('pg');
 require('dotenv').config();
+const cors = require('cors');
 
 const app = express();
+
+const corsOptions = {
+    origin: '*', // Permite qualquer origem. Use isso para testar.
+                 // Em produção, mude para: origin: 'https://seu-dominio-do-frontend.com.br',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+    optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
 const apiId = 23313993; 
